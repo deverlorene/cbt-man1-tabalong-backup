@@ -123,7 +123,7 @@
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
               <div>
                 <h2 class="text-xl font-bold text-slate-800">Monitoring Ruang Ujian & Absensi</h2>
-                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Klik Refresh atau aktifkan Auto-60d untuk memperbarui status kehadiran, jadwal & kunci siswa.</p>
+                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Klik Refresh atau aktifkan Auto-60d untuk memperbarui status kehadiran, jadwal sesi & kunci siswa.</p>
               </div>
               <div class="flex gap-2 w-full md:w-auto flex-wrap items-center">
                 <input type="text" id="search-ruang" onkeyup="cariTabel('search-ruang', 'tb-ruang-ujian')" placeholder="Cari siswa..." class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
@@ -899,4 +899,436 @@
             statusHadir: sudahHadir ? "Hadir" : "Belum Hadir",
             keterangan: ketStatus,
             statusSesiLive: sudahHadir && h ? h.statusSesi : "AKTIF",
-            catatanLock: sudahHadir && h ? h.cat
+            catatanLock: sudahHadir && h ? h.catatan : "-"
+          };
+        });
+
+        if (infoEl) {
+          var jamUpdate = new Date().toLocaleTimeString("id-ID");
+          var labelSesi = (sesiTarget && sesiTarget !== "Semua")
+            ? ("Sesi " + sesiTarget + " • " + infoJadwalDipilih.label + " (Tgl: " + tglQuery + ")")
+            : ("Semua Sesi (Tgl: " + tglQuery + ")");
+          infoEl.innerText = "Update: " + jamUpdate + " • Angkatan: " + angkatanTarget + " • Ruang: " + (isPengawas ? currentUser.ruang : ruangTarget) + " • " + labelSesi;
+        }
+
+        renderTabelRuangAdmin();
+      } catch (e) {
+        tb.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Gagal memuat ruang ujian: ${escapeAttr(e.message)}</td></tr>`;
+      }
+    }
+
+    function renderTabelRuangAdmin() {
+      var tb = document.getElementById("tb-ruang-ujian");
+      var fAngkatan = document.getElementById("filter-angkatan-ruang") ? document.getElementById("filter-angkatan-ruang").value : "Semua";
+      var fRuang = document.getElementById("filter-ruang").value;
+      if (currentUser && currentUser.role === "pengawas") {
+        fRuang = currentUser.ruang;
+      }
+
+      var filtered = dataRuangGlobal.filter(function(item) {
+        var okRuang = (fRuang === "Semua") || (item.ruang === fRuang);
+        var okAng = (fAngkatan === "Semua") || (item.angkatan === fAngkatan);
+        return okRuang && okAng;
+      });
+      var tPeserta = 0, tHadir = 0, tBelum = 0;
+      tb.innerHTML = "";
+
+      if (filtered.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data sesuai filter.</td></tr>';
+      } else {
+        filtered.forEach(function(d) {
+          tPeserta++;
+          if (d.statusHadir === "Hadir") tHadir++; else tBelum++;
+          var cHadir = d.statusHadir === "Hadir" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700";
+          var rowBg = d.statusSesiLive === "TERKUNCI" ? "bg-red-50 border-l-4 border-red-500" : "hover:bg-slate-50";
+          var cKet = d.keterangan.toLowerCase().includes("selesai") ? "text-blue-600 font-bold" : "text-slate-600";
+          var aksiUnlock = "";
+          var ketTampil = d.keterangan;
+
+          if (d.statusSesiLive === "TERKUNCI") {
+            cKet = "text-red-600 font-bold text-xs leading-tight";
+            ketTampil = "TERKUNCI: " + d.catatanLock;
+            aksiUnlock = `<button onclick="bukaKunci('${escapeAttr(d.nisn)}', this)" class="mt-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-1.5 rounded shadow-sm w-full transition-all"><i class="fas fa-unlock"></i> Buka Kunci</button>`;
+          }
+
+          var mapelHtml = d.mapel
+            ? `<br><span class="text-[11px] font-semibold text-indigo-600">Mapel: ${escapeAttr(d.mapel)}</span>`
+            : "";
+
+          tb.innerHTML += `<tr class="${rowBg} border-b border-slate-100 transition-colors"><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span>${mapelHtml}</td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${d.statusHadir}</span></td><td class="px-4 py-3 font-mono">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td></tr>`;
+        });
+      }
+
+      document.getElementById("r-total").innerText = tPeserta;
+      document.getElementById("r-hadir").innerText = tHadir;
+      document.getElementById("r-belum").innerText = tBelum;
+    }
+
+    async function bukaKunci(nisn, btnElement) {
+      btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuka...';
+      btnElement.disabled = true;
+      try {
+        var docId = safeTodayStr() + "_" + safeSanitizeId(nisn);
+        await db.collection("log_absensi").doc(docId).update({ statusSesi: "AKTIF", catatan: "Dibuka otomatis via dashboard" });
+        await catatAktivitasAdmin("Membuka kunci ujian siswa NISN: " + nisn);
+        await muatDataRuangUjian(true);
+      } catch (e) {
+        alert("Gagal membuka kunci (kemungkinan kuota/koneksi Firestore bermasalah, gunakan kode darurat di HP siswa): " + e.message);
+        btnElement.innerHTML = '<i class="fas fa-unlock"></i> Buka Kunci';
+        btnElement.disabled = false;
+      }
+    }
+
+    async function loadHasilUjianAdmin(forceRefresh) {
+      var tb = document.getElementById("tb-hasil-ujian-admin");
+      if (!forceRefresh && memCache.hasil) {
+        dataHasilUjianGlobal = memCache.hasil;
+        isiFilterDanRenderHasil();
+        return;
+      }
+
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik rekap nilai...</td></tr>';
+      var snap = await db.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(400).get();
+      var list = [];
+      snap.forEach(function(doc) {
+        var d = doc.data();
+        list.push({
+          waktu: d.waktuView || "-",
+          nisn: d.nisn,
+          nama: d.nama,
+          kelas: d.kelas,
+          mapel: d.mapel,
+          nilai: d.nilaiAkhir,
+          status: d.status || "Selesai"
+        });
+      });
+      memCache.hasil = list;
+      dataHasilUjianGlobal = list;
+      isiFilterDanRenderHasil();
+    }
+
+    function isiFilterDanRenderHasil() {
+      var unikKelas = [], unikMapel = [];
+      dataHasilUjianGlobal.forEach(function(item) {
+        if (item.kelas && unikKelas.indexOf(item.kelas) === -1) unikKelas.push(item.kelas);
+        if (item.mapel && unikMapel.indexOf(item.mapel) === -1) unikMapel.push(item.mapel);
+      });
+      unikKelas.sort(); unikMapel.sort();
+
+      var fk = document.getElementById("filter-kelas");
+      var oldK = fk.value;
+      fk.innerHTML = '<option value="Semua">Semua Kelas</option>';
+      unikKelas.forEach(function(k) { fk.innerHTML += `<option value="${escapeAttr(k)}">${escapeAttr(k)}</option>`; });
+      if (Array.from(fk.options).some(function(o) { return o.value === oldK; })) fk.value = oldK;
+
+      var fm = document.getElementById("filter-mapel");
+      var oldM = fm.value;
+      fm.innerHTML = '<option value="Semua">Semua Mapel</option>';
+      unikMapel.forEach(function(m) { fm.innerHTML += `<option value="${escapeAttr(m)}">${escapeAttr(m)}</option>`; });
+      if (Array.from(fm.options).some(function(o) { return o.value === oldM; })) fm.value = oldM;
+
+      renderTabelHasilAdmin();
+    }
+
+    function renderTabelHasilAdmin() {
+      var tb = document.getElementById("tb-hasil-ujian-admin");
+      var fKelas = document.getElementById("filter-kelas").value, fMapel = document.getElementById("filter-mapel").value, fStatus = document.getElementById("filter-status").value;
+      var filtered = dataHasilUjianGlobal.filter(function(item) {
+        var mk = (fKelas === "Semua") || (item.kelas === fKelas);
+        var mm = (fMapel === "Semua") || (item.mapel === fMapel);
+        var ms = true;
+        if (fStatus === "Curang") ms = item.status.toLowerCase().includes("diskualifikasi") || item.status.toLowerCase().includes("pelanggaran");
+        else if (fStatus === "DibawahKKM") ms = parseFloat(item.nilai) < 60;
+        else if (fStatus === "Normal") ms = item.status.toLowerCase().includes("selesai");
+        return mk && mm && ms;
+      });
+      tb.innerHTML = "";
+      if (filtered.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data.</td></tr>'; return; }
+      filtered.forEach(function(d) {
+        var cNilai = d.nilai < 60 ? "text-red-500" : "text-emerald-600";
+        var bStatus = (d.status.toLowerCase().includes("diskualifikasi") || d.status.toLowerCase().includes("pelanggaran")) ? "bg-red-100 text-red-700" : (d.status.toLowerCase().includes("habis") ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700");
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.waktu)}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama || "-")}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn || "-")}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas || "-")}</td><td class="px-4 py-3">${escapeAttr(d.mapel || "-")}</td><td class="px-4 py-3 text-center font-black ${cNilai}">${escapeAttr(d.nilai || 0)}</td><td class="px-4 py-3 text-center"><span class="${bStatus} px-2 py-1 rounded text-xs font-bold whitespace-normal inline-block max-w-[150px] leading-tight">${escapeAttr(d.status || "-")}</span></td></tr>`;
+      });
+    }
+
+    function unduhCSVHasilAdmin() {
+      var rows = [["Waktu", "Nama Siswa", "NISN", "Kelas", "Mata Pelajaran", "Nilai Akhir", "Catatan Status"]];
+      var tb = document.getElementById("tb-hasil-ujian-admin");
+      for (var i = 0; i < tb.rows.length; i++) {
+        if (tb.rows[i].cells.length === 6) {
+          var namaNisn = tb.rows[i].cells[1].innerText.split("\n");
+          rows.push([tb.rows[i].cells[0].innerText, namaNisn[0], namaNisn[1] || "", tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText, tb.rows[i].cells[4].innerText, tb.rows[i].cells[5].innerText]);
+        }
+      }
+      var csvContent = "data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n");
+      var link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "Laporan_Pusat_Hasil_Ujian.csv");
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    async function loadGuruStats(forceRefresh) {
+      var snap = await db.collection("rekap_nilai").where("mapel", "==", currentUser.mapel).get();
+      var hasil = [], total = 0, max = 0, min = 100, peserta = 0;
+      snap.forEach(function(doc) {
+        var r = doc.data();
+        var n = parseFloat(r.nilaiAkhir) || 0;
+        peserta++; total += n;
+        if (n > max) max = n; if (n < min) min = n;
+        hasil.push({ nama: r.nama, nisn: r.nisn, kelas: r.kelas, nilai: n });
+      });
+      document.getElementById("g-rata").innerText = peserta > 0 ? (total / peserta).toFixed(1) : 0;
+      document.getElementById("g-max").innerText = max;
+      document.getElementById("g-min").innerText = peserta > 0 ? min : 0;
+      document.getElementById("g-peserta").innerText = peserta;
+      var tb = document.getElementById("tb-guru-rekap"); tb.innerHTML = "";
+      if (hasil.length === 0) tb.innerHTML = '<tr><td colspan="4" class="text-center py-4">Belum ada siswa ujian.</td></tr>';
+      else hasil.forEach(function(r) {
+        var c = r.nilai < 60 ? "text-red-500" : "text-emerald-600";
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-6 py-4">${escapeAttr(r.nama)}</td><td class="px-6 py-4">${escapeAttr(r.nisn)}</td><td class="px-6 py-4">${escapeAttr(r.kelas)}</td><td class="px-6 py-4 font-black ${c}">${escapeAttr(r.nilai)}</td></tr>`;
+      });
+    }
+
+    function unduhCSVNilaiGuru() {
+      var rows = [["Nama Siswa", "NISN", "Kelas", "Nilai Akhir"]];
+      var tb = document.getElementById("tb-guru-rekap");
+      for (var i = 0; i < tb.rows.length; i++) {
+        if (tb.rows[i].cells.length === 4) rows.push([tb.rows[i].cells[0].innerText, tb.rows[i].cells[1].innerText, tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText]);
+      }
+      var link = document.createElement("a");
+      link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n")));
+      link.setAttribute("download", "Rekap_Nilai_" + currentUser.mapel + ".csv");
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    async function bukaEditSoalGuru(event) {
+      var btn = event.currentTarget, orig = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuka...';
+      var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", false);
+      btn.innerHTML = orig;
+      var linkForm = "";
+      jadwalList.forEach(function(item) {
+        if (!linkForm && item.mapel === currentUser.mapel && item.linkForm) linkForm = item.linkForm;
+      });
+      if (linkForm) window.open(linkForm, "_blank");
+      else alert("Link Edit Soal belum diatur oleh Admin di Menu Master Ujian.");
+    }
+
+    async function loadDataLogPengawas(forceRefresh) {
+      var tb = document.getElementById("tb-pengawas-log");
+      tb.innerHTML = '<tr><td colspan="4" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik data...</td></tr>';
+      var snap = await db.collection("rekap_nilai").where("tanggal", "==", safeTodayStr()).get();
+      tb.innerHTML = "";
+      if (snap.empty) { tb.innerHTML = '<tr><td colspan="4" class="text-center py-4">Belum ada ujian selesai hari ini.</td></tr>'; return; }
+      var logs = [];
+      snap.forEach(function(d) { logs.push(d.data()); });
+      logs.sort(function(a, b) { return (b.waktuSelesai || "").localeCompare(a.waktuSelesai || ""); });
+      logs.slice(0, 50).forEach(function(log) {
+        var statBadge = (log.status || "").includes("Selesai") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700";
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-6 py-4 font-mono font-semibold">${escapeAttr(log.jamView || "-")}</td><td class="px-6 py-4">${escapeAttr(log.nama)}<br><span class="text-xs text-slate-400">${escapeAttr(log.kelas)}</span></td><td class="px-6 py-4">${escapeAttr(log.mapel)}</td><td class="px-6 py-4"><span class="${statBadge} px-2 py-1 rounded text-xs font-bold">${escapeAttr(log.status || "Selesai")}</span></td></tr>`;
+      });
+    }
+
+    // CRUD SISWA
+    async function loadDataSiswa(forceRefresh) {
+      var tb = document.getElementById("tb-data-siswa");
+      if (!forceRefresh && readStorageCache("siswa")) {
+        renderTabelSiswa(readStorageCache("siswa"));
+        return;
+      }
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat...</td></tr>';
+      var list = await getMasterCollectionCached("data_siswa", "siswa", true);
+      renderTabelSiswa(list);
+    }
+
+    function renderTabelSiswa(list) {
+      var tb = document.getElementById("tb-data-siswa");
+      tb.innerHTML = "";
+      if (!list || list.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="text-center py-4">Belum ada data.</td></tr>'; return; }
+      list.forEach(function(s) {
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-4 py-3">${escapeAttr(s.nisn)}</td><td class="px-4 py-3">${escapeAttr(s.noPeserta)}</td><td class="px-4 py-3">${escapeAttr(s.nama)}</td><td class="px-4 py-3">${escapeAttr(s.kelas)} / ${escapeAttr(s.angkatan)}</td><td class="px-4 py-3 font-bold">${escapeAttr(s.ruang)}</td><td class="px-4 py-3 text-center"><button onclick="bukaModalEditSiswa('${escapeAttr(s.nisn)}', '${escapeAttr(s.noPeserta)}', '${escapeAttr(s.nama)}', '${escapeAttr(s.kelas)}', '${escapeAttr(s.angkatan)}', '${escapeAttr(s.password)}', '${escapeAttr(s.ruang)}')" class="text-blue-500 hover:text-blue-700 px-2"><i class="fas fa-edit"></i></button><button onclick="hapusSiswa('${escapeAttr(s.nisn)}')" class="text-red-500 hover:text-red-700 px-2"><i class="fas fa-trash"></i></button></td></tr>`;
+      });
+    }
+
+    function bukaModalSiswa() { editState = { mode: false }; document.getElementById("title-siswa").innerText = "Tambah Siswa"; ["in-nisn", "in-nopes", "in-nama", "in-kelas", "in-angkatan", "in-ruang", "in-pass"].forEach(function(id) { document.getElementById(id).value = ""; }); document.getElementById("modal-tambah-siswa").classList.remove("hidden"); }
+    function bukaModalEditSiswa(n, np, nm, kl, ang, ps, ru) { editState = { mode: true, type: "siswa", id1: n }; document.getElementById("title-siswa").innerText = "Edit Siswa"; document.getElementById("in-nisn").value = n; document.getElementById("in-nopes").value = np; document.getElementById("in-nama").value = nm; document.getElementById("in-kelas").value = kl; document.getElementById("in-angkatan").value = ang; document.getElementById("in-ruang").value = ru; document.getElementById("in-pass").value = ps; document.getElementById("modal-tambah-siswa").classList.remove("hidden"); }
+    async function simpanSiswa() {
+      var d = { nisn: document.getElementById("in-nisn").value.trim(), noPeserta: document.getElementById("in-nopes").value.trim(), nama: document.getElementById("in-nama").value.trim(), kelas: document.getElementById("in-kelas").value.trim(), angkatan: document.getElementById("in-angkatan").value.trim(), ruang: document.getElementById("in-ruang").value.trim(), password: document.getElementById("in-pass").value.trim() };
+      if (!d.nisn || !d.nama || !d.password) { alert("Wajib isi NISN, Nama, dan Password"); return; }
+      document.getElementById("btn-simpan-siswa").innerText = "Loading...";
+      if (editState.mode && editState.id1 !== d.nisn) await db.collection("data_siswa").doc(safeSanitizeId(editState.id1)).delete();
+      await db.collection("data_siswa").doc(safeSanitizeId(d.nisn)).set(d);
+      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Siswa: " + d.nama);
+      document.getElementById("btn-simpan-siswa").innerText = "Simpan"; tutupModal("modal-tambah-siswa"); await loadDataSiswa(true);
+    }
+    async function hapusSiswa(nisn) { if (confirm("Hapus siswa NISN " + nisn + "?")) { await db.collection("data_siswa").doc(safeSanitizeId(nisn)).delete(); await catatAktivitasAdmin("Menghapus Siswa NISN: " + nisn); await loadDataSiswa(true); } }
+
+    // CRUD GURU
+    async function loadDataGuru(forceRefresh) {
+      var tb = document.getElementById("tb-data-guru");
+      if (!forceRefresh && readStorageCache("guru")) {
+        renderTabelGuru(readStorageCache("guru"));
+        return;
+      }
+      tb.innerHTML = '<tr><td colspan="5" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat...</td></tr>';
+      var list = await getMasterCollectionCached("data_guru", "guru", true);
+      renderTabelGuru(list);
+    }
+
+    function renderTabelGuru(list) {
+      var tb = document.getElementById("tb-data-guru");
+      tb.innerHTML = "";
+      if (!list || list.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Belum ada data.</td></tr>'; return; }
+      list.forEach(function(g) {
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-4 py-3">${escapeAttr(g.nip)}</td><td class="px-4 py-3">${escapeAttr(g.nama)}</td><td class="px-4 py-3">${escapeAttr(g.mapel)}</td><td class="px-4 py-3 text-slate-400">${escapeAttr(g.password)}</td><td class="px-4 py-3 text-center"><button onclick="bukaModalEditGuru('${escapeAttr(g.nip)}', '${escapeAttr(g.nama)}', '${escapeAttr(g.mapel)}', '${escapeAttr(g.password)}')" class="text-blue-500 hover:text-blue-700 px-2"><i class="fas fa-edit"></i></button><button onclick="hapusGuru('${escapeAttr(g.nip)}', '${escapeAttr(g.mapel)}')" class="text-red-500 hover:text-red-700 px-2"><i class="fas fa-trash"></i></button></td></tr>`;
+      });
+    }
+
+    function bukaModalGuru() { editState = { mode: false }; document.getElementById("title-guru").innerText = "Tambah Penugasan Guru"; ["in-guru-nip", "in-guru-nama", "in-guru-mapel", "in-guru-pass"].forEach(function(id) { document.getElementById(id).value = ""; }); document.getElementById("modal-tambah-guru").classList.remove("hidden"); }
+    function bukaModalEditGuru(nip, nm, mp, ps) { editState = { mode: true, type: "guru", id1: nip, id2: mp }; document.getElementById("title-guru").innerText = "Edit Guru"; document.getElementById("in-guru-nip").value = nip; document.getElementById("in-guru-nama").value = nm; document.getElementById("in-guru-mapel").value = mp; document.getElementById("in-guru-pass").value = ps; document.getElementById("modal-tambah-guru").classList.remove("hidden"); }
+    async function simpanGuru() {
+      var d = { nip: document.getElementById("in-guru-nip").value.trim(), nama: document.getElementById("in-guru-nama").value.trim(), mapel: document.getElementById("in-guru-mapel").value.trim(), password: document.getElementById("in-guru-pass").value.trim() };
+      if (!d.nip || !d.mapel || !d.password) { alert("Wajib diisi lengkap!"); return; }
+      document.getElementById("btn-simpan-guru").innerText = "Loading...";
+      if (editState.mode) await db.collection("data_guru").doc(safeSanitizeId(editState.id1 + "_" + editState.id2)).delete();
+      await db.collection("data_guru").doc(safeSanitizeId(d.nip + "_" + d.mapel)).set(d);
+      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Guru: " + d.nama);
+      document.getElementById("btn-simpan-guru").innerText = "Simpan"; tutupModal("modal-tambah-guru"); await loadDataGuru(true);
+    }
+    async function hapusGuru(nip, mapel) { if (confirm("Hapus penugasan " + mapel + "?")) { await db.collection("data_guru").doc(safeSanitizeId(nip + "_" + mapel)).delete(); await catatAktivitasAdmin("Menghapus Guru NIP: " + nip); await loadDataGuru(true); } }
+
+    // CRUD PENGAWAS
+    async function loadDataPengawas(forceRefresh) {
+      var tb = document.getElementById("tb-data-pengawas");
+      if (!forceRefresh && readStorageCache("pengawas")) {
+        renderTabelPengawas(readStorageCache("pengawas"));
+        return;
+      }
+      tb.innerHTML = '<tr><td colspan="5" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat...</td></tr>';
+      var list = await getMasterCollectionCached("data_pengawas", "pengawas", true);
+      renderTabelPengawas(list);
+    }
+
+    function renderTabelPengawas(list) {
+      var tb = document.getElementById("tb-data-pengawas");
+      tb.innerHTML = "";
+      if (!list || list.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Belum ada data.</td></tr>'; return; }
+      list.forEach(function(p) {
+        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-4 py-3 font-semibold">${escapeAttr(p.user)}</td><td class="px-4 py-3">${escapeAttr(p.nama)}</td><td class="px-4 py-3"><span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">${escapeAttr(p.ruang)}</span></td><td class="px-4 py-3 text-slate-400">${escapeAttr(p.password)}</td><td class="px-4 py-3 text-center"><button onclick="bukaModalEditPengawas('${escapeAttr(p.user)}', '${escapeAttr(p.nama)}', '${escapeAttr(p.ruang)}', '${escapeAttr(p.password)}')" class="text-blue-500 hover:text-blue-700 px-2"><i class="fas fa-edit"></i></button><button onclick="hapusPengawas('${escapeAttr(p.user)}')" class="text-red-500 hover:text-red-700 px-2"><i class="fas fa-trash"></i></button></td></tr>`;
+      });
+    }
+
+    function bukaModalPengawas() { editState = { mode: false }; document.getElementById("title-pengawas").innerText = "Tambah Pengawas"; ["in-pengawas-user", "in-pengawas-nama", "in-pengawas-ruang", "in-pengawas-pass"].forEach(function(id) { document.getElementById(id).value = ""; }); document.getElementById("modal-tambah-pengawas").classList.remove("hidden"); }
+    function bukaModalEditPengawas(us, nm, ru, ps) { editState = { mode: true, type: "pengawas", id1: us }; document.getElementById("title-pengawas").innerText = "Edit Pengawas"; document.getElementById("in-pengawas-user").value = us; document.getElementById("in-pengawas-nama").value = nm; document.getElementById("in-pengawas-ruang").value = ru; document.getElementById("in-pengawas-pass").value = ps; document.getElementById("modal-tambah-pengawas").classList.remove("hidden"); }
+    async function simpanPengawas() {
+      var d = { user: document.getElementById("in-pengawas-user").value.trim(), nama: document.getElementById("in-pengawas-nama").value.trim(), ruang: document.getElementById("in-pengawas-ruang").value.trim(), password: document.getElementById("in-pengawas-pass").value.trim() };
+      if (!d.user || !d.ruang || !d.password) { alert("Wajib diisi lengkap!"); return; }
+      document.getElementById("btn-simpan-pengawas").innerText = "Loading...";
+      if (editState.mode && editState.id1 !== d.user) await db.collection("data_pengawas").doc(safeSanitizeId(editState.id1)).delete();
+      await db.collection("data_pengawas").doc(safeSanitizeId(d.user)).set(d);
+      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Pengawas: " + d.user);
+      document.getElementById("btn-simpan-pengawas").innerText = "Simpan"; tutupModal("modal-tambah-pengawas"); await loadDataPengawas(true);
+    }
+    async function hapusPengawas(user) { if (confirm("Hapus pengawas " + user + "?")) { await db.collection("data_pengawas").doc(safeSanitizeId(user)).delete(); await catatAktivitasAdmin("Menghapus Pengawas: " + user); await loadDataPengawas(true); } }
+
+    // CRUD JADWAL
+    async function loadDataJadwal(forceRefresh) {
+      var tb = document.getElementById("tb-jadwal-ujian");
+      if (!forceRefresh && readStorageCache("jadwal")) {
+        renderTabelJadwal(readStorageCache("jadwal"));
+        return;
+      }
+      tb.innerHTML = '<tr><td colspan="5" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat Jadwal...</td></tr>';
+      var list = await getMasterCollectionCached("master_ujian", "jadwal", true);
+      renderTabelJadwal(list);
+    }
+
+    function renderTabelJadwal(list) {
+      var tb = document.getElementById("tb-jadwal-ujian");
+      tb.innerHTML = "";
+      if (!list || list.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Belum ada jadwal.</td></tr>'; return; }
+      var now = new Date();
+      list.forEach(function(j) {
+        var docId = j._docId || j.docId || "";
+        var tglView = "Belum Diatur", statusWarna = "putih";
+        if (j.tanggal) {
+          var p = j.tanggal.split("-");
+          if (p.length === 3) {
+            tglView = p[2] + "/" + p[1] + "/" + p[0];
+            var jDate = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+            var diffDays = Math.ceil((jDate - now) / (1000 * 60 * 60 * 24));
+            if (diffDays === 1 || diffDays === 0) statusWarna = "kuning";
+            else if (jDate < now) statusWarna = "hijau";
+          }
+        }
+        var rowColor = statusWarna === "kuning" ? "bg-yellow-50 hover:bg-yellow-100" : (statusWarna === "hijau" ? "bg-emerald-50 hover:bg-emerald-100" : "bg-white hover:bg-slate-50");
+        tb.innerHTML += `<tr class="${rowColor} border-b border-slate-200"><td class="px-4 py-3 font-medium">${escapeAttr(tglView)}<br><span class="text-xs text-slate-500">${escapeAttr(j.jamMulai || "")} - ${escapeAttr(j.jamSelesai || "")}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(j.mapel || "")}</td><td class="px-4 py-3">${escapeAttr(j.kelas || "")}</td><td class="px-4 py-3 font-mono font-bold text-purple-600">${escapeAttr(j.token || "")}</td><td class="px-4 py-3 text-center"><button onclick="bukaModalEditJadwal('${escapeAttr(docId)}', '${escapeAttr(j.tanggal || "")}', '${escapeAttr(j.jamMulai || "")}', '${escapeAttr(j.jamSelesai || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.token || "")}', '${escapeAttr(j.kelas || "")}', '${escapeAttr(j.status || "Aktif")}', '${escapeAttr(j.linkForm || "")}')" class="text-blue-500 hover:text-blue-700 px-2"><i class="fas fa-edit"></i></button><button onclick="hapusJadwal('${escapeAttr(docId)}', '${escapeAttr(j.mapel || "")}')" class="text-red-500 hover:text-red-700 px-2"><i class="fas fa-trash"></i></button></td></tr>`;
+      });
+    }
+
+    function bukaModalJadwal() {
+      editState = { mode: false };
+      document.getElementById("title-jadwal").innerText = "Tambah Jadwal";
+      ["in-jadwal-tgl", "in-jadwal-mulai", "in-jadwal-selesai", "in-jadwal-mapel", "in-jadwal-token", "in-jadwal-kelas", "in-jadwal-link"].forEach(function(id) { document.getElementById(id).value = ""; });
+      document.getElementById("in-jadwal-status").value = "Aktif";
+      document.getElementById("modal-tambah-jadwal").classList.remove("hidden");
+    }
+
+    function bukaModalEditJadwal(docId, tg, jm, js, mp, tk, kl, st, lk) {
+      editState = { mode: true, type: "jadwal", id1: docId, id2: mp };
+      document.getElementById("title-jadwal").innerText = "Edit Jadwal";
+      document.getElementById("in-jadwal-tgl").value = tg;
+      document.getElementById("in-jadwal-mulai").value = jm;
+      document.getElementById("in-jadwal-selesai").value = js;
+      document.getElementById("in-jadwal-mapel").value = mp;
+      document.getElementById("in-jadwal-token").value = tk;
+      document.getElementById("in-jadwal-kelas").value = kl;
+      document.getElementById("in-jadwal-status").value = st;
+      document.getElementById("in-jadwal-link").value = lk;
+      document.getElementById("modal-tambah-jadwal").classList.remove("hidden");
+    }
+
+    async function simpanJadwal() {
+      var linkForm = document.getElementById("in-jadwal-link").value.trim();
+      var m = linkForm.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      var formId = (m && m[1]) ? m[1] : "";
+      var mapel = document.getElementById("in-jadwal-mapel").value.trim();
+      var kelas = document.getElementById("in-jadwal-kelas").value.trim();
+      var newDocId = formId ? safeSanitizeId(formId) : safeSanitizeId(mapel + "_" + kelas);
+
+      var d = {
+        docId: newDocId,
+        tanggal: document.getElementById("in-jadwal-tgl").value.trim(),
+        jamMulai: document.getElementById("in-jadwal-mulai").value.trim(),
+        jamSelesai: document.getElementById("in-jadwal-selesai").value.trim(),
+        mapel: mapel,
+        token: document.getElementById("in-jadwal-token").value.trim(),
+        kelas: kelas,
+        status: document.getElementById("in-jadwal-status").value.trim(),
+        linkForm: linkForm,
+        formId: formId
+      };
+      if (!d.mapel || !d.token || !d.linkForm) { alert("Mata Pelajaran, Token, dan Link wajib diisi!"); return; }
+      document.getElementById("btn-simpan-jadwal").innerText = "Menyimpan...";
+      if (editState.mode && editState.id1 && editState.id1 !== newDocId) {
+        await db.collection("master_ujian").doc(editState.id1).delete();
+      }
+      await db.collection("master_ujian").doc(newDocId).set(d);
+      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Jadwal Ujian: " + d.mapel);
+      document.getElementById("btn-simpan-jadwal").innerText = "Simpan";
+      tutupModal("modal-tambah-jadwal");
+      await loadDataJadwal(true);
+      await refreshAdminStats(false);
+    }
+
+    async function hapusJadwal(docId, mapel) {
+      if (confirm("Hapus Master Ujian mapel: " + mapel + "?")) {
+        await db.collection("master_ujian").doc(docId).delete();
+        await catatAktivitasAdmin("Menghapus Jadwal Ujian: " + mapel);
+        await loadDataJadwal(true);
+        await refreshAdminStats(false);
+      }
+    }
+  </script>
+</body>
+</html>
