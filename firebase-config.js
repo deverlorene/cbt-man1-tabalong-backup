@@ -3,15 +3,15 @@
 // =========================================================================
 
 const firebaseConfig = {
-  apiKey: "GANTI_DENGAN_API_KEY_ASLI",
+  apiKey: "AIzaSyBiK7v2PLgFeSC_FSi-iN3EL7mTh3bOZHc",
   authDomain: "cbt-man1-tabalong.firebaseapp.com",
   projectId: "cbt-man1-tabalong",
   storageBucket: "cbt-man1-tabalong.firebasestorage.app",
-  messagingSenderId: "GANTI_DENGAN_SENDER_ID_ASLI",
-  appId: "GANTI_DENGAN_APP_ID_ASLI"
+  messagingSenderId: "150623087457",
+  appId: "1:150623087457:web:69936beda7f09bdd1b7320"
 };
 
-// Inisialisasi Firebase & Firestore
+// Inisialisasi Firebase & Firestore (Compat v10)
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
