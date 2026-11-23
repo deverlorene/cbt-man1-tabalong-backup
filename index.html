@@ -1,30 +1,1577 @@
-// =========================================================================
-// KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG
-// =========================================================================
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Portal CBT ASAS - Siswa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Firebase SDK v10 Compat -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <style>
+      .anti-copas {
+        -webkit-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      .bg-tech {
+        background-color: #0f172a;
+        background-image: linear-gradient(rgba(6, 182, 212, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(6, 182, 212, 0.05) 1px, transparent 1px);
+        background-size: 30px 30px;
+      }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #1e293b; }
+      ::-webkit-scrollbar-thumb { background: #06b6d4; border-radius: 4px; }
+      img { pointer-events: none; }
 
-const firebaseConfig = {
-  apiKey: "GANTI_DENGAN_API_KEY_ASLI",
-  authDomain: "cbt-man1-tabalong.firebaseapp.com",
-  projectId: "cbt-man1-tabalong",
-  storageBucket: "cbt-man1-tabalong.firebasestorage.app",
-  messagingSenderId: "GANTI_DENGAN_SENDER_ID_ASLI",
-  appId: "GANTI_DENGAN_APP_ID_ASLI"
-};
+      #dynamic-watermark {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        pointer-events: none;
+        z-index: 50;
+        overflow: hidden;
+      }
+      .watermark-text {
+        position: absolute;
+        color: rgba(255, 255, 255, 0.05);
+        font-size: 1.5rem;
+        font-weight: bold;
+        transform: rotate(-30deg);
+        white-space: nowrap;
+        animation: float 20s infinite linear;
+      }
+      @keyframes float {
+        0% { transform: translate(-10%, -10%) rotate(-30deg); }
+        50% { transform: translate(110%, 110%) rotate(-30deg); }
+        100% { transform: translate(-10%, -10%) rotate(-30deg); }
+      }
+      @media print {
+        body { display: none !important; }
+      }
+    </style>
+  </head>
+  <body class="bg-tech h-screen flex flex-col items-center justify-center p-4 anti-copas text-gray-200 relative">
 
-// Inisialisasi Firebase & Firestore
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const db = firebase.firestore();
+    <div id="dynamic-watermark" class="hidden"></div>
 
-function getTodayStr() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+    <!-- BANNER MODE PREVIEW -->
+    <div id="preview-top-banner" class="hidden fixed top-0 left-0 right-0 z-[1000] bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-extrabold flex items-center justify-between shadow-lg">
+      <span>👁️ MODE PREVIEW ADMIN — Nilai, Absensi, Timer Kunci Soal & Anti-Cheat Dinonaktifkan</span>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="bukaSelectorPreview()" class="bg-slate-900 text-amber-300 px-2.5 py-0.5 rounded hover:bg-slate-800">Ganti Mapel</button>
+        <button type="button" onclick="keluarModePreview()" class="bg-red-700 text-white px-2.5 py-0.5 rounded hover:bg-red-600">Keluar Preview</button>
+      </div>
+    </div>
 
-function sanitizeId(str) {
-  return String(str || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_");
-}
+    <!-- MODAL PEMILIH PAKET SOAL PREVIEW (?preview=1) -->
+    <div id="preview-selector-page" class="hidden bg-slate-800 border border-amber-500/40 p-7 rounded-xl shadow-[0_0_30px_rgba(245,158,11,0.18)] w-full max-w-xl relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent"></div>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <span class="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px] px-2.5 py-0.5 rounded font-bold uppercase">Mode Preview</span>
+          <h2 class="text-xl font-bold text-amber-300 mt-1">Pilih Paket Soal di Firebase</h2>
+        </div>
+        <button type="button" onclick="keluarModePreview()" class="text-slate-400 hover:text-red-400 text-xs font-bold">Ke Login Siswa ➔</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-4">Pilih mata pelajaran yang sudah di-sync ke <code class="text-cyan-300">bank_soal</code> untuk melihat tampilan soal, gambar, dan opsi berurutan persis seperti Google Form.</p>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-amber-200 text-xs font-bold mb-1 uppercase">Daftar Paket Soal Tersedia</label>
+          <select id="select-preview-bank" class="w-full px-3 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-sm text-cyan-100 focus:outline-none focus:border-amber-400">
+            <option value="">Memuat daftar bank_soal...</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 text-xs font-bold mb-1 uppercase">Atau Masukkan Form ID Secara Manual</label>
+          <input type="text" id="input-preview-formid" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-cyan-100 focus:outline-none focus:border-amber-400" placeholder="Tempel Form ID Google Form...">
+        </div>
+        <p id="pesan-error-preview" class="text-red-400 text-xs font-bold hidden"></p>
+        <button type="button" id="btn-mulai-preview" onclick="muatDanBukaPreview()" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold py-3 px-4 rounded-lg text-sm uppercase">
+          Buka Tampilan Ujian Siswa ➔
+        </button>
+      </div>
+    </div>
+
+    <!-- 1. LOGIN PESERTA -->
+    <div id="login-page" class="bg-slate-800 border border-cyan-500/30 p-8 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)] text-center w-full max-w-md relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
+      <h1 class="text-2xl font-bold text-cyan-400 mb-1 tracking-wider">CBT TKA MAN 1 TABALONG</h1>
+      <p class="text-cyan-600/70 mb-6 text-sm font-semibold tracking-widest">ASESMEN BERBASIS KOMPUTER</p>
+      <div class="space-y-4 text-left">
+        <div>
+          <label class="block text-cyan-300 text-xs font-bold mb-1 uppercase tracking-wide">Nomor Peserta</label>
+          <input type="text" id="username" class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-cyan-400 text-cyan-100" placeholder="Ketik No Peserta..." autocomplete="off">
+        </div>
+        <div>
+          <label class="block text-cyan-300 text-xs font-bold mb-1 uppercase tracking-wide">Password (NISN)</label>
+          <div class="relative">
+            <input type="password" id="password" class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-cyan-400 text-cyan-100 pr-10" placeholder="Ketik NISN..." autocomplete="off">
+            <button type="button" onclick="togglePassword()" class="absolute right-3 top-3.5 text-slate-400 hover:text-cyan-300 text-sm font-bold">👁️</button>
+          </div>
+        </div>
+        <button onclick="tombolLogin()" id="btn-login" class="bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold py-3 px-4 rounded-lg w-full hover:from-cyan-500 hover:to-blue-500 uppercase mt-4">Login Peserta ➔</button>
+        <p id="pesan-error-login" class="text-red-400 text-sm font-bold text-center mt-2 hidden"></p>
+        <div class="backup-banner hidden text-xs text-amber-300 bg-amber-950/50 border border-amber-700/50 rounded-lg px-3 py-2 mt-4 text-center"></div>
+      </div>
+    </div>
+
+    <!-- 2. KONFIRMASI DATA -->
+    <div id="konfirmasi-data-page" class="hidden bg-slate-800 border border-cyan-500/30 p-8 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)] w-full max-w-2xl relative overflow-hidden">
+      <button onclick="logoutSiswa()" class="absolute top-4 right-4 text-slate-400 hover:text-red-400 text-sm font-bold transition-colors"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
+      <h2 class="text-2xl font-bold text-cyan-400 mb-6 border-b border-slate-700 pb-3 mt-4">Konfirmasi Data Peserta</h2>
+      <div class="space-y-4 text-sm md:text-base">
+        <div class="grid grid-cols-1 md:grid-cols-3 border-b border-slate-700 pb-2"><span class="text-slate-400">NISN / No. Peserta</span><span class="md:col-span-2 text-slate-200 font-semibold" id="kd-nisn"></span></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 border-b border-slate-700 pb-2"><span class="text-slate-400">Nama Peserta</span><span class="md:col-span-2 text-slate-200 font-semibold" id="kd-nama"></span></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 border-b border-slate-700 pb-2"><span class="text-slate-400">Kelas / Ruang</span><span class="md:col-span-2 text-slate-200 font-semibold" id="kd-kelas"></span></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 items-center pt-2">
+          <span class="text-slate-400 mb-2 md:mb-0">Token Ujian</span>
+          <div class="md:col-span-2">
+            <input type="text" id="input-token" class="w-full md:w-2/3 px-4 py-2 bg-slate-900 border border-purple-500/50 rounded-lg focus:outline-none focus:border-purple-400 text-purple-100 uppercase tracking-widest font-bold" placeholder="Ketik Token..." autocomplete="off">
+            <p id="pesan-error-token" class="text-red-400 text-xs mt-2 hidden font-bold"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOX BLOKIR UJIAN ULANG / KODE REMEDIAL PANITIA -->
+      <div id="box-remedial-panitia" class="hidden mt-6 bg-amber-950/60 border border-amber-500/50 rounded-xl p-4">
+        <div class="flex items-start gap-3">
+          <div class="text-amber-400 text-xl mt-0.5"><i class="fas fa-lock"></i></div>
+          <div class="flex-1">
+            <h3 class="text-sm font-bold text-amber-300 uppercase tracking-wide">Ujian Sudah Pernah Diselesaikan</h3>
+            <p class="text-xs text-slate-300 mt-1" id="teks-info-sudah-selesai">
+              Sistem mencatat Anda sudah menyelesaikan mata pelajaran ini. Setiap peserta hanya diperbolehkan mengerjakan ujian 1 kali.
+            </p>
+            <div class="mt-3">
+              <label class="block text-[11px] font-bold text-amber-200 uppercase mb-1">
+                Kode Izin Panitia (Khusus Remedial / Ujian Ulang)
+              </label>
+              <div class="flex flex-col sm:flex-row gap-2">
+                <input type="password" id="input-kode-remedial" class="flex-1 px-3 py-2 bg-slate-950 border border-amber-500/40 rounded-lg text-sm text-white focus:outline-none focus:border-amber-400" placeholder="Masukkan kode panitia..." autocomplete="off">
+                <button type="button" id="btn-verifikasi-remedial" onclick="verifikasiKodeRemedial()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2 rounded-lg text-xs uppercase whitespace-nowrap">
+                  Buka Akses Remedial ➔
+                </button>
+              </div>
+              <p id="pesan-error-remedial" class="text-red-400 text-xs font-bold mt-1.5 hidden"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="tombolSubmitToken()" id="btn-token" class="mt-8 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-lg w-full text-sm uppercase">Submit Data & Token</button>
+    </div>
+
+    <!-- 3. KONFIRMASI TES -->
+    <div id="konfirmasi-tes-page" class="hidden bg-slate-800 border border-cyan-500/30 p-8 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)] w-full max-w-lg relative overflow-hidden">
+      <button onclick="logoutSiswa()" class="absolute top-4 right-4 text-slate-400 hover:text-red-400 text-sm font-bold transition-colors"><i class="fas fa-sign-out-alt"></i> Keluar Sesi</button>
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
+      <h2 class="text-2xl font-bold text-cyan-400 mb-6 border-b border-slate-700 pb-3 mt-4">Konfirmasi Tes</h2>
+      <div class="space-y-4 text-sm md:text-base">
+        <div class="grid grid-cols-2 border-b border-slate-700 pb-2"><span class="text-slate-400">Nama Tes</span><span class="text-cyan-300 font-bold" id="kt-mapel"></span></div>
+        <div class="grid grid-cols-2 border-b border-slate-700 pb-2"><span class="text-slate-400">Status Tes</span><span class="text-emerald-400 font-semibold" id="kt-status">Tes Baru</span></div>
+        <div class="grid grid-cols-2 border-b border-slate-700 pb-2"><span class="text-slate-400">Waktu Mulai</span><span class="text-slate-200 font-semibold" id="kt-waktu"></span></div>
+        <div class="grid grid-cols-2 border-b border-slate-700 pb-2"><span class="text-slate-400">Sisa Waktu Ujian</span><span class="text-yellow-400 font-mono font-bold" id="kt-sisa">60 Menit 0 Detik</span></div>
+      </div>
+      <button onclick="mulaiUjianFinal()" id="btn-mulai" class="mt-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg w-full text-sm uppercase">Mulai Tes</button>
+    </div>
+
+    <!-- 4. HALAMAN UJIAN SISWA -->
+    <div id="siswa-page" class="hidden w-full max-w-5xl bg-slate-800 border border-slate-700 p-6 rounded-xl shadow-2xl relative flex flex-col h-[90vh]">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-4 mb-4 relative z-10">
+        <div>
+          <span class="bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs px-2.5 py-1 rounded font-bold" id="info-mapel-badge">Mapel</span>
+          <h2 class="text-lg font-bold text-cyan-400 mt-1" id="info-nama-siswa">Nama Siswa</h2>
+        </div>
+        <div class="text-right">
+          <p class="text-xs text-slate-400">Sisa Waktu</p>
+          <p class="text-sm font-mono font-bold text-yellow-400" id="timer-ujian">01:00:00</p>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto pr-2 grid grid-cols-1 md:grid-cols-12 gap-6 relative z-10">
+        <div class="md:col-span-7 bg-slate-900/60 border border-slate-700/60 p-6 rounded-xl flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider" id="label-nomor-soal">Soal Nomor 1</span>
+              <span class="bg-emerald-500/20 text-emerald-300 text-xs px-2 py-0.5 rounded font-semibold transition-all duration-300" id="badge-autosave">Tersimpan</span>
+            </div>
+            <div id="teks-pertanyaan-container" class="text-sm md:text-base text-slate-100 leading-relaxed mb-6"></div>
+          </div>
+          <div id="area-opsi" class="space-y-3"></div>
+        </div>
+        <div class="md:col-span-5 bg-slate-900/60 border border-slate-700/60 p-5 rounded-xl flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Navigasi Soal</h3>
+              <span id="info-lock-navigasi" class="text-[11px] text-amber-300 font-semibold hidden"></span>
+            </div>
+            <div id="panel-navigasi-grid" class="grid grid-cols-5 gap-2"></div>
+            <div class="mt-6 space-y-2 text-xs text-slate-400 border-t border-slate-800 pt-4">
+              <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-600 inline-block"></span> Sedang Aktif</div>
+              <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-blue-600 inline-block"></span> Sudah Terjawab</div>
+              <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-yellow-500 inline-block"></span> Ragu-Ragu</div>
+              <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-700 inline-block"></span> Belum Dijawab</div>
+            </div>
+          </div>
+          <div class="mt-6 pt-4 border-t border-slate-800 flex flex-col gap-2">
+            <button onclick="tandaiRagu()" class="bg-yellow-600/30 hover:bg-yellow-600/50 border border-yellow-500/50 text-yellow-300 font-bold py-2 px-4 rounded-lg text-sm transition-all">Ragu-Ragu</button>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-between items-center border-t border-slate-700 pt-4 mt-4 relative z-10">
+        <button onclick="soalSebelumnya()" id="btn-prev" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-5 rounded-lg text-sm">&laquo; Sebelumnya</button>
+        <button onclick="selesaiUjian()" id="btn-selesai" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm uppercase hidden">Akhiri Ujian</button>
+        <button onclick="soalSelanjutnya()" id="btn-next" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm transition-all">Selanjutnya &raquo;</button>
+      </div>
+    </div>
+
+    <!-- MODAL LOCK -->
+    <div id="modal-lock" class="hidden fixed inset-0 bg-slate-950/95 z-[999] flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-red-500/50 p-7 rounded-2xl max-w-md w-full text-center shadow-[0_0_50px_rgba(239,68,68,0.3)]">
+        <div class="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold border border-red-500/40">🔒</div>
+        <h2 class="text-2xl font-bold text-red-400 mb-2">UJIAN TERKUNCI</h2>
+        <p class="text-slate-300 text-sm mb-3" id="pesan-lock-info">Anda terdeteksi keluar dari layar penuh / berpindah tab / mencoba menyalin data.</p>
+        <div class="bg-red-950/50 border border-red-900 p-3 rounded-lg text-xs text-red-300 mb-4 font-mono" id="status-pelanggaran-teks">Pelanggaran ke-1 dari 5. Angkat tangan & lapor Pengawas.</div>
+
+        <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3 mb-4">
+          <div class="flex items-center justify-center gap-2 text-cyan-400 text-xs font-semibold uppercase tracking-wider">
+            <span class="animate-spin inline-block">⟳</span>
+            <span class="animate-pulse">Menunggu buka kunci dashboard (real-time)...</span>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-amber-500/30 rounded-xl p-4 text-left">
+          <label class="block text-[11px] font-bold text-amber-300 uppercase tracking-wider mb-1.5">
+            Kode Buka Kunci Darurat (Jika Dashboard Bermasalah)
+          </label>
+          <div class="flex gap-2">
+            <input type="password" id="input-kode-buka-kunci" class="flex-1 px-3 py-2 bg-slate-950 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-amber-400" placeholder="Masukkan kode pengawas..." autocomplete="off">
+            <button type="button" onclick="verifikasiKodeManual()" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs uppercase whitespace-nowrap">
+              Buka Kunci
+            </button>
+          </div>
+          <p id="pesan-error-kode-manual" class="text-red-400 text-xs font-semibold mt-2 hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
+      var KEY_BACKUP_QUEUE = "CBT_BACKUP_QUEUE_V1";
+      var MAX_PELANGGARAN = 5;
+      var KODE_BUKA_KUNCI_DARURAT = "man1katanya";
+      var KODE_REMEDIAL_PANITIA = "man1katanya";
+      var DURASI_COUNTDOWN_SOAL = 30;
+
+      var URL_PARAMS = new URLSearchParams(window.location.search);
+      var isPreviewMode = URL_PARAMS.get("preview") === "1" || URL_PARAMS.get("preview") === "true";
+      var previewInitialFormId = (URL_PARAMS.get("formId") || "").trim();
+
+      var bankSoal = [];
+      var indeksSoalSekarang = 0;
+      var jawabanSiswa = {};
+      var statusRagu = {};
+      var dataUserAktif = {};
+      var soalSudahPernahDibuka = {};
+      var timerSoalInterval = null;
+      var detiktersisa = DURASI_COUNTDOWN_SOAL;
+      var countdownAktifSoalIndex = null;
+      var jumlahPelanggaran = 0;
+      var statusUjianBerlangsung = false;
+      var isTerkunci = false;
+      var isSedangMengumpulkan = false;
+      var totalDetikUjian = 3600;
+      var intervalTimerUjian = null;
+      var unsubscribeLockListener = null;
+
+      var ujianTertundaRemedial = null;
+      var isIzinRemedialAktif = false;
+
+      function isCountdownSedangBerjalan() {
+        if (isPreviewMode) return false;
+        return countdownAktifSoalIndex !== null && detiktersisa > 0;
+      }
+
+      function getAbsensiDocId(nisn) {
+        return getTodayStr() + "_" + sanitizeId(nisn);
+      }
+
+      async function pastikanTercatatHadir(tahap) {
+        if (isPreviewMode) return;
+        if (!dataUserAktif || !dataUserAktif.nisn) return;
+
+        var todayStr = getTodayStr();
+        var mapelAktif = dataUserAktif.mapel ? String(dataUserAktif.mapel) : "";
+        var cacheAbsenKey = "CBT_ABSEN_OK_" + todayStr + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(mapelAktif);
+
+        if (localStorage.getItem(cacheAbsenKey) === "1") {
+          return;
+        }
+
+        var now = new Date();
+        var jamStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+        var payloadAbsen = {
+          tipe: "absensi",
+          source: "github_firestore_" + (tahap || "auto"),
+          tanggal: todayStr,
+          waktuLogin: now.toISOString(),
+          jamLogin: jamStr,
+          nisn: String(dataUserAktif.nisn),
+          nama: dataUserAktif.nama || "-",
+          kelas: dataUserAktif.kelas || "-",
+          ruang: dataUserAktif.ruang || "-",
+          mapel: mapelAktif || "-",
+          statusSesi: "AKTIF",
+          catatan: "-"
+        };
+
+        var absenRef = db.collection("log_absensi").doc(getAbsensiDocId(dataUserAktif.nisn));
+        try {
+          var existingAbsen = await absenRef.get();
+          if (!existingAbsen.exists) {
+            await absenRef.set(payloadAbsen);
+          } else {
+            var d = existingAbsen.data() || {};
+            var patch = {
+              tanggal: todayStr,
+              jamLogin: d.jamLogin || jamStr,
+              waktuLogin: d.waktuLogin || now.toISOString(),
+              nisn: String(dataUserAktif.nisn),
+              nama: d.nama || dataUserAktif.nama || "-",
+              kelas: d.kelas || dataUserAktif.kelas || "-",
+              ruang: d.ruang || dataUserAktif.ruang || "-"
+            };
+            if (mapelAktif) patch.mapel = mapelAktif;
+            await absenRef.set(patch, { merge: true });
+          }
+          localStorage.setItem(cacheAbsenKey, "1");
+        } catch (errFirestoreAbsen) {
+          var backupIdAbsen = "ABSEN_" + todayStr + "_" + sanitizeId(dataUserAktif.nisn);
+          masukAntreanBackup({ id: backupIdAbsen, payload: payloadAbsen });
+          var okBackupAbsen = await kirimKeWebAppBackup(payloadAbsen);
+          if (okBackupAbsen) {
+            hapusDariAntreanBackup(backupIdAbsen);
+          }
+        }
+      }
+
+      function getSessionStorageKey() {
+        if (isPreviewMode) return null;
+        if (!dataUserAktif || !dataUserAktif.nisn || !dataUserAktif.mapel) return null;
+        return "CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel;
+      }
+
+      function getCompletedLockKey(nisn, mapel) {
+        return "CBT_DONE_" + sanitizeId(nisn) + "_" + sanitizeId(mapel);
+      }
+
+      function cekSudahSelesaiLokal(nisn, mapel) {
+        try {
+          var raw = localStorage.getItem(getCompletedLockKey(nisn, mapel));
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function tandaiSelesaiLokal(nisn, mapel, statusStr) {
+        try {
+          localStorage.setItem(getCompletedLockKey(nisn, mapel), JSON.stringify({
+            status: statusStr || "Selesai",
+            waktu: new Date().toISOString()
+          }));
+        } catch (e) {}
+      }
+
+      function hapusTandaSelesaiLokal(nisn, mapel) {
+        try {
+          localStorage.removeItem(getCompletedLockKey(nisn, mapel));
+          localStorage.removeItem("CBT_" + nisn + "_" + mapel);
+        } catch (e) {}
+      }
+
+      async function cekSudahSelesaiDiServer(nisn, mapel) {
+        var lokalDone = cekSudahSelesaiLokal(nisn, mapel);
+        if (lokalDone) {
+          return { sudahSelesai: true, info: lokalDone.status || "Selesai (Tercatat di perangkat)" };
+        }
+
+        var docIdHariIni = getTodayStr() + "_" + sanitizeId(nisn) + "_" + sanitizeId(mapel);
+        try {
+          var docToday = await db.collection("rekap_nilai").doc(docIdHariIni).get();
+          if (docToday.exists) {
+            var d1 = docToday.data() || {};
+            var st1 = String(d1.status || "").trim();
+            if (st1.toLowerCase().indexOf("selesai") !== -1 || st1.toLowerCase().indexOf("diskualifikasi") !== -1 || st1.toLowerCase().indexOf("habis") !== -1) {
+              tandaiSelesaiLokal(nisn, mapel, st1);
+              return { sudahSelesai: true, info: st1 };
+            }
+          }
+
+          var snapPrev = await db.collection("rekap_nilai")
+            .where("nisn", "==", String(nisn))
+            .where("mapel", "==", String(mapel))
+            .limit(5)
+            .get();
+
+          var ketemu = null;
+          snapPrev.forEach(function(doc) {
+            var d2 = doc.data() || {};
+            var st2 = String(d2.status || "").trim();
+            if (st2.toLowerCase().indexOf("selesai") !== -1 || st2.toLowerCase().indexOf("diskualifikasi") !== -1 || st2.toLowerCase().indexOf("habis") !== -1) {
+              ketemu = st2;
+            }
+          });
+
+          if (ketemu) {
+            tandaiSelesaiLokal(nisn, mapel, ketemu);
+            return { sudahSelesai: true, info: ketemu };
+          }
+        } catch (e) {}
+
+        return { sudahSelesai: false, info: "" };
+      }
+
+      function bacaAntreanBackup() {
+        try {
+          var raw = localStorage.getItem(KEY_BACKUP_QUEUE);
+          var arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr : [];
+        } catch (e) {
+          return [];
+        }
+      }
+
+      function simpanAntreanBackup(arr) {
+        try {
+          localStorage.setItem(KEY_BACKUP_QUEUE, JSON.stringify(arr));
+        } catch (e) {}
+      }
+
+      function masukAntreanBackup(item) {
+        var queue = bacaAntreanBackup();
+        var idx = queue.findIndex(function(x) { return x.id === item.id; });
+        if (idx > -1) {
+          queue[idx] = item;
+        } else {
+          queue.push(item);
+        }
+        simpanAntreanBackup(queue);
+        perbaruiBannerBackup();
+      }
+
+      function hapusDariAntreanBackup(itemId) {
+        var queue = bacaAntreanBackup().filter(function(x) { return x.id !== itemId; });
+        simpanAntreanBackup(queue);
+        perbaruiBannerBackup();
+      }
+
+      async function kirimKeWebAppBackup(payload) {
+        if (!URL_WEB_APP_BACKUP || URL_WEB_APP_BACKUP.indexOf("https://") !== 0) {
+          return false;
+        }
+        try {
+          await fetch(URL_WEB_APP_BACKUP, {
+            method: "POST",
+            mode: "no-cors",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(payload)
+          });
+          return true;
+        } catch (err) {
+          return false;
+        }
+      }
+
+      async function kirimSemuaAntreanBackup() {
+        var queue = bacaAntreanBackup();
+        if (queue.length === 0) {
+          alert("Tidak ada data cadangan yang tertunda.");
+          return;
+        }
+
+        var terkirim = 0;
+        for (var i = 0; i < queue.length; i++) {
+          var item = queue[i];
+          var ok = await kirimKeWebAppBackup(item.payload);
+          if (ok) {
+            hapusDariAntreanBackup(item.id);
+            terkirim++;
+          }
+        }
+
+        if (bacaAntreanBackup().length === 0) {
+          alert("Berhasil mengirim ulang " + terkirim + " data cadangan ke server backup.");
+        } else {
+          alert("Sebagian data (" + terkirim + ") terkirim. Masih ada antrean karena koneksi/server belum merespons.");
+        }
+      }
+
+      function perbaruiBannerBackup() {
+        var banners = document.querySelectorAll(".backup-banner");
+        if (!banners || banners.length === 0) return;
+        var sisa = bacaAntreanBackup().length;
+        banners.forEach(function(el) {
+          if (sisa > 0) {
+            el.classList.remove("hidden");
+            el.innerHTML = 'Ada <b>' + sisa + '</b> data cadangan di perangkat ini. ' +
+              '<button type="button" onclick="kirimSemuaAntreanBackup()" class="underline font-bold text-amber-300 ml-1">Kirim Ulang Sekarang</button>';
+          } else {
+            el.classList.add("hidden");
+            el.innerHTML = "";
+          }
+        });
+      }
+
+      async function bukaSelectorPreview() {
+        statusUjianBerlangsung = false;
+        if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+        if (timerSoalInterval) clearInterval(timerSoalInterval);
+        countdownAktifSoalIndex = null;
+
+        document.body.classList.remove("anti-copas");
+        document.getElementById("preview-top-banner").classList.remove("hidden");
+        document.getElementById("login-page").classList.add("hidden");
+        document.getElementById("konfirmasi-data-page").classList.add("hidden");
+        document.getElementById("konfirmasi-tes-page").classList.add("hidden");
+        document.getElementById("siswa-page").classList.add("hidden");
+        document.getElementById("preview-selector-page").classList.remove("hidden");
+
+        var sel = document.getElementById("select-preview-bank");
+        var errEl = document.getElementById("pesan-error-preview");
+        errEl.classList.add("hidden");
+        sel.innerHTML = '<option value="">Memuat daftar bank_soal dari Firestore...</option>';
+
+        try {
+          var snap = await db.collection("bank_soal").get();
+          var daftar = [];
+          snap.forEach(function(doc) {
+            var d = doc.data() || {};
+            daftar.push({
+              formId: doc.id,
+              mapel: d.mapel || "(Tanpa Nama Mapel)",
+              totalSoal: d.totalSoal || 0
+            });
+          });
+          daftar.sort(function(a, b) { return a.mapel.localeCompare(b.mapel); });
+
+          if (daftar.length === 0) {
+            sel.innerHTML = '<option value="">Belum ada dokumen di koleksi bank_soal</option>';
+          } else {
+            var htmlOpt = '<option value="">-- Pilih Paket Soal (' + daftar.length + ' tersedia) --</option>';
+            daftar.forEach(function(item) {
+              var selected = (previewInitialFormId && item.formId === previewInitialFormId) ? " selected" : "";
+              htmlOpt += '<option value="' + item.formId + '"' + selected + '>' +
+                item.mapel + ' — (' + item.totalSoal + ' soal) [' + item.formId + ']</option>';
+            });
+            sel.innerHTML = htmlOpt;
+          }
+        } catch (e) {
+          sel.innerHTML = '<option value="">Gagal memuat daftar otomatis (gunakan input manual di bawah)</option>';
+          errEl.innerText = "Info: " + e.message;
+          errEl.classList.remove("hidden");
+        }
+      }
+
+      async function muatDanBukaPreview(overrideFormId) {
+        var errEl = document.getElementById("pesan-error-preview");
+        var btn = document.getElementById("btn-mulai-preview");
+        errEl.classList.add("hidden");
+
+        var manualId = document.getElementById("input-preview-formid").value.trim();
+        var selectedId = document.getElementById("select-preview-bank").value.trim();
+        var targetFormId = overrideFormId || manualId || selectedId;
+
+        if (!targetFormId) {
+          errEl.innerText = "Pilih salah satu paket soal atau isi Form ID terlebih dahulu.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+
+        var urlMatch = targetFormId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        if (urlMatch && urlMatch[1]) {
+          targetFormId = urlMatch[1];
+        }
+
+        btn.disabled = true;
+        btn.innerText = "Mengambil Soal & Gambar...";
+
+        try {
+          var metaDoc = await db.collection("bank_soal").doc(targetFormId).get();
+          var metaData = metaDoc.exists ? (metaDoc.data() || {}) : {};
+          var namaMapel = metaData.mapel || ("Preview Form: " + targetFormId);
+
+          var chunksSnap = await db.collection("bank_soal").doc(targetFormId).collection("chunks").orderBy("chunkIndex").get();
+          var dataSoalBaru = [];
+          chunksSnap.forEach(function(doc) {
+            var arr = JSON.parse(doc.data().itemsJson || "[]");
+            dataSoalBaru = dataSoalBaru.concat(arr);
+          });
+
+          btn.disabled = false;
+          btn.innerText = "Buka Tampilan Ujian Siswa ➔";
+
+          if (dataSoalBaru.length === 0) {
+            errEl.innerText = "Paket soal kosong atau belum di-sync ke Firebase (0 soal di chunks).";
+            errEl.classList.remove("hidden");
+            return;
+          }
+
+          for (var i = 0; i < dataSoalBaru.length; i++) {
+            dataSoalBaru[i].no = i + 1;
+            soalSudahPernahDibuka[i] = true;
+          }
+
+          dataUserAktif = {
+            nisn: "PREVIEW",
+            noPeserta: "PREVIEW-ADMIN",
+            nama: "MODE PREVIEW ADMIN",
+            kelas: "SIMULASI",
+            ruang: "-",
+            mapel: namaMapel,
+            formId: targetFormId
+          };
+
+          bankSoal = dataSoalBaru;
+          indeksSoalSekarang = 0;
+          jawabanSiswa = {};
+          statusRagu = {};
+          jumlahPelanggaran = 0;
+          isTerkunci = false;
+          totalDetikUjian = 5400;
+
+          document.getElementById("preview-selector-page").classList.add("hidden");
+          document.getElementById("siswa-page").classList.remove("hidden");
+          document.getElementById("info-nama-siswa").innerText = "MODE PREVIEW ADMIN (" + bankSoal.length + " Soal)";
+          document.getElementById("info-mapel-badge").innerText = namaMapel;
+          document.getElementById("badge-autosave").innerText = "Mode Preview";
+
+          statusUjianBerlangsung = true;
+          mulaiTimerUjian();
+          tampilkanSoal(0, false);
+        } catch (e) {
+          btn.disabled = false;
+          btn.innerText = "Buka Tampilan Ujian Siswa ➔";
+          errEl.innerText = "Gagal memuat preview: " + e.message;
+          errEl.classList.remove("hidden");
+        }
+      }
+
+      function keluarModePreview() {
+        window.location.href = window.location.pathname;
+      }
+
+      document.addEventListener("DOMContentLoaded", function() {
+        perbaruiBannerBackup();
+
+        if (isPreviewMode) {
+          bukaSelectorPreview().then(function() {
+            if (previewInitialFormId) {
+              document.getElementById("input-preview-formid").value = previewInitialFormId;
+              muatDanBukaPreview(previewInitialFormId);
+            }
+          });
+          return;
+        }
+
+        var savedSession = localStorage.getItem("cbt_siswa_session");
+        if (savedSession) {
+          dataUserAktif = JSON.parse(savedSession);
+          dataUserAktif.nisn = String(dataUserAktif.nisn);
+          document.getElementById("login-page").classList.add("hidden");
+          document.getElementById("konfirmasi-data-page").classList.remove("hidden");
+          document.getElementById("kd-nisn").innerText = dataUserAktif.nisn + (dataUserAktif.noPeserta ? " / " + dataUserAktif.noPeserta : "");
+          document.getElementById("kd-nama").innerText = dataUserAktif.nama;
+          document.getElementById("kd-kelas").innerText = dataUserAktif.kelas + " / Ruang: " + (dataUserAktif.ruang || "-");
+
+          pastikanTercatatHadir("resume_session");
+        }
+      });
+
+      document.addEventListener("contextmenu", function(e) {
+        if (isPreviewMode) return;
+        e.preventDefault();
+      });
+      document.addEventListener("keydown", function(e) {
+        if (isPreviewMode) return;
+        if (e.keyCode === 123) { e.preventDefault(); eksekusiPelanggaran("Mencoba membuka inspect element (F12)!"); }
+        if (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) { e.preventDefault(); eksekusiPelanggaran("Mencoba membuka Developer Tools!"); }
+        if (e.ctrlKey && e.key === "U") { e.preventDefault(); eksekusiPelanggaran("Mencoba melihat Source Code!"); }
+        if (e.ctrlKey && e.key === "P") { e.preventDefault(); eksekusiPelanggaran("Mencoba Print soal ujian!"); }
+        if (e.ctrlKey && (e.key === "C" || e.key === "c" || e.keyCode === 67)) {
+          if (statusUjianBerlangsung && !isTerkunci) {
+            e.preventDefault();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText("").catch(function() {});
+            }
+            eksekusiPelanggaran("Mencoba menyalin (Copy) isi soal!");
+          }
+        }
+      });
+
+      window.addEventListener("keyup", function(e) {
+        if (isPreviewMode) return;
+        if (statusUjianBerlangsung && !isTerkunci && (e.key === "PrintScreen" || e.keyCode === 44 || e.code === "PrintScreen" || (e.metaKey && e.shiftKey && (e.key === "s" || e.key === "3" || e.key === "4" || e.key === "5")))) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText("Screenshot dilarang.").catch(function() {});
+          }
+          eksekusiPelanggaran("Mendeteksi kombinasi tombol Screenshot!");
+        }
+      });
+
+      document.addEventListener("visibilitychange", function() {
+        if (isPreviewMode) return;
+        if (document.hidden && statusUjianBerlangsung && !isTerkunci) {
+          eksekusiPelanggaran("Berpindah tab/aplikasi lain!");
+        }
+      });
+
+      document.addEventListener("fullscreenchange", function() {
+        if (isPreviewMode) return;
+        if (!document.fullscreenElement && statusUjianBerlangsung && !isTerkunci) {
+          eksekusiPelanggaran("Keluar dari Mode Layar Penuh!");
+        }
+      });
+
+      function aktifkanWatermark() {
+        var wm = document.getElementById("dynamic-watermark");
+        wm.innerHTML = "";
+        wm.classList.remove("hidden");
+        var textToDisplay = dataUserAktif.nama + " | " + dataUserAktif.nisn;
+        for (var i = 0; i < 8; i++) {
+          var el = document.createElement("div");
+          el.className = "watermark-text";
+          el.innerText = textToDisplay;
+          el.style.top = (Math.random() * 100) + "%";
+          el.style.animationDelay = "-" + (Math.random() * 10) + "s";
+          wm.appendChild(el);
+        }
+      }
+
+      function togglePassword() {
+        var p = document.getElementById("password");
+        p.type = p.type === "password" ? "text" : "password";
+      }
+
+      function hentikanListenerKunci() {
+        if (unsubscribeLockListener) {
+          unsubscribeLockListener();
+          unsubscribeLockListener = null;
+        }
+      }
+
+      function lanjutkanSetelahBukaKunci(metodeBukaKunci) {
+        hentikanListenerKunci();
+        isTerkunci = false;
+        document.getElementById("modal-lock").classList.add("hidden");
+        document.getElementById("input-kode-buka-kunci").value = "";
+        document.getElementById("pesan-error-kode-manual").classList.add("hidden");
+
+        statusUjianBerlangsung = false;
+        if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+
+        saveStateToLocal();
+
+        document.getElementById("siswa-page").classList.add("hidden");
+        document.getElementById("dynamic-watermark").classList.add("hidden");
+        document.getElementById("konfirmasi-tes-page").classList.remove("hidden");
+
+        var sisaPeringatan = MAX_PELANGGARAN - jumlahPelanggaran;
+        if (jumlahPelanggaran >= MAX_PELANGGARAN - 1) {
+          document.getElementById("kt-status").innerText = "Melanjutkan Ujian (Peringatan Terakhir - Sisa 1x)";
+          document.getElementById("kt-status").className = "text-red-400 font-semibold";
+          alert("PERINGATAN TERAKHIR! Pelanggaran berikutnya (" + MAX_PELANGGARAN + "/" + MAX_PELANGGARAN + ") akan langsung mengirim jawaban paksa. Klik MULAI TES untuk kembali ke layar penuh.");
+        } else {
+          document.getElementById("kt-status").innerText = "Melanjutkan Ujian (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")";
+          document.getElementById("kt-status").className = "text-yellow-400 font-semibold";
+          alert("Kunci dibuka (" + metodeBukaKunci + "). Sisa toleransi pelanggaran: " + sisaPeringatan + " kali. Klik MULAI TES untuk kembali ke layar penuh.");
+        }
+        document.getElementById("kt-sisa").innerText = Math.floor(totalDetikUjian / 60) + " Menit " + (totalDetikUjian % 60) + " Detik";
+      }
+
+      function dengarkanBukaKunciRealtime() {
+        hentikanListenerKunci();
+        if (!dataUserAktif || !dataUserAktif.nisn) return;
+        var docId = getAbsensiDocId(dataUserAktif.nisn);
+
+        unsubscribeLockListener = db.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
+          if (doc.exists && doc.data().statusSesi === "AKTIF" && isTerkunci) {
+            lanjutkanSetelahBukaKunci("otomatis dari dashboard");
+          }
+        }, function() {});
+      }
+
+      async function verifikasiKodeManual() {
+        var inputEl = document.getElementById("input-kode-buka-kunci");
+        var errEl = document.getElementById("pesan-error-kode-manual");
+        var kode = inputEl.value.trim();
+
+        if (!kode) {
+          errEl.innerText = "Masukkan kode buka kunci dari pengawas.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+
+        if (kode !== KODE_BUKA_KUNCI_DARURAT) {
+          errEl.innerText = "Kode buka kunci salah!";
+          errEl.classList.remove("hidden");
+          return;
+        }
+
+        errEl.classList.add("hidden");
+        if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
+          var docId = getAbsensiDocId(dataUserAktif.nisn);
+          try {
+            await db.collection("log_absensi").doc(docId).set({
+              tanggal: getTodayStr(),
+              nisn: String(dataUserAktif.nisn),
+              nama: dataUserAktif.nama || "-",
+              kelas: dataUserAktif.kelas || "-",
+              ruang: dataUserAktif.ruang || "-",
+              mapel: dataUserAktif.mapel || "-",
+              statusSesi: "AKTIF",
+              catatan: "Dibuka manual via kode darurat (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
+            }, { merge: true });
+          } catch (e) {}
+        }
+
+        lanjutkanSetelahBukaKunci("kode darurat manual");
+      }
+
+      function eksekusiPelanggaran(alasan) {
+        if (isPreviewMode || isTerkunci) return;
+        jumlahPelanggaran++;
+        saveStateToLocal();
+
+        if (jumlahPelanggaran >= MAX_PELANGGARAN) {
+          hentikanListenerKunci();
+          isTerkunci = false;
+          statusUjianBerlangsung = false;
+          if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+          if (timerSoalInterval) clearInterval(timerSoalInterval);
+          countdownAktifSoalIndex = null;
+          document.getElementById("modal-lock").classList.add("hidden");
+          document.getElementById("dynamic-watermark").classList.add("hidden");
+
+          if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
+            var docId = getAbsensiDocId(dataUserAktif.nisn);
+            db.collection("log_absensi").doc(docId).set({
+              tanggal: getTodayStr(),
+              nisn: String(dataUserAktif.nisn),
+              nama: dataUserAktif.nama || "-",
+              kelas: dataUserAktif.kelas || "-",
+              ruang: dataUserAktif.ruang || "-",
+              mapel: dataUserAktif.mapel || "-",
+              statusSesi: "SELESAI_PAKSA",
+              catatan: "Diskualifikasi (5x Pelanggaran): " + alasan
+            }, { merge: true }).catch(function() {});
+          }
+
+          alert("❌ BATAS " + MAX_PELANGGARAN + " PELANGGARAN TERCAPAI! Jawaban Anda dikirim paksa secara otomatis.");
+          prosesPengumpulanNilai("Diskualifikasi (5x Pelanggaran)");
+          return;
+        }
+
+        isTerkunci = true;
+        document.getElementById("input-kode-buka-kunci").value = "";
+        document.getElementById("pesan-error-kode-manual").classList.add("hidden");
+        document.getElementById("pesan-lock-info").innerText = "Alasan: " + alasan;
+        document.getElementById("status-pelanggaran-teks").innerText =
+          "⚠️ Pelanggaran ke-" + jumlahPelanggaran + " dari " + MAX_PELANGGARAN + ". Angkat tangan & lapor Pengawas.";
+        document.getElementById("modal-lock").classList.remove("hidden");
+
+        if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
+          var absDocId = getAbsensiDocId(dataUserAktif.nisn);
+          db.collection("log_absensi").doc(absDocId).set({
+            tanggal: getTodayStr(),
+            nisn: String(dataUserAktif.nisn),
+            nama: dataUserAktif.nama || "-",
+            kelas: dataUserAktif.kelas || "-",
+            ruang: dataUserAktif.ruang || "-",
+            mapel: dataUserAktif.mapel || "-",
+            statusSesi: "TERKUNCI",
+            catatan: alasan + " (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
+          }, { merge: true }).catch(function() {});
+        }
+
+        dengarkanBukaKunciRealtime();
+      }
+
+      function aktifkanLayarPenuh() {
+        var e = document.documentElement;
+        if (e.requestFullscreen) {
+          e.requestFullscreen().catch(function() {
+            console.log("Menunggu interaksi user untuk layar penuh.");
+          });
+        }
+      }
+
+      async function tombolLogin() {
+        var u = document.getElementById("username").value.trim();
+        var p = document.getElementById("password").value.trim();
+        var err = document.getElementById("pesan-error-login");
+        if (u === "" || p === "") {
+          err.innerText = "Isi No Peserta dan NISN!";
+          err.classList.remove("hidden");
+          return;
+        }
+        err.classList.add("hidden");
+        document.getElementById("btn-login").innerText = "Loading...";
+
+        try {
+          var docRef = await db.collection("data_siswa").doc(sanitizeId(p)).get();
+          var found = null;
+          if (docRef.exists && String(docRef.data().noPeserta).trim() === u) {
+            found = docRef.data();
+          } else {
+            var snap = await db.collection("data_siswa").where("noPeserta", "==", u).limit(5).get();
+            snap.forEach(function(d) {
+              if (String(d.data().nisn).trim() === p) found = d.data();
+            });
+          }
+
+          document.getElementById("btn-login").innerText = "Login Peserta ➔";
+          if (found) {
+            dataUserAktif = {
+              nisn: String(found.nisn),
+              noPeserta: String(found.noPeserta),
+              nama: found.nama,
+              kelas: found.kelas,
+              angkatan: found.angkatan || "",
+              ruang: found.ruang || "-"
+            };
+
+            await pastikanTercatatHadir("login");
+
+            localStorage.setItem("cbt_siswa_session", JSON.stringify(dataUserAktif));
+            document.getElementById("login-page").classList.add("hidden");
+            document.getElementById("konfirmasi-data-page").classList.remove("hidden");
+            document.getElementById("kd-nisn").innerText = dataUserAktif.nisn + (dataUserAktif.noPeserta ? " / " + dataUserAktif.noPeserta : "");
+            document.getElementById("kd-nama").innerText = dataUserAktif.nama;
+            document.getElementById("kd-kelas").innerText = dataUserAktif.kelas + " / Ruang: " + (dataUserAktif.ruang || "-");
+          } else {
+            err.innerText = "Nomor Peserta atau Password (NISN) salah!";
+            err.classList.remove("hidden");
+          }
+        } catch (e) {
+          document.getElementById("btn-login").innerText = "Login Peserta ➔";
+          err.innerText = "Koneksi Firebase gagal: " + e.message;
+          err.classList.remove("hidden");
+        }
+      }
+
+      function logoutSiswa() {
+        if (!confirm("Yakin ingin logout dari sesi Anda?")) return;
+        hentikanListenerKunci();
+        localStorage.removeItem("cbt_siswa_session");
+        location.reload();
+      }
+
+      function saveStateToLocal() {
+        if (isPreviewMode) return;
+        var key = getSessionStorageKey();
+        if (!key) return;
+        var state = {
+          jawaban: jawabanSiswa,
+          ragu: statusRagu,
+          sisaWaktu: totalDetikUjian,
+          dibuka: soalSudahPernahDibuka,
+          pelanggaran: jumlahPelanggaran,
+          isRemedial: isIzinRemedialAktif,
+          timestamp: new Date().getTime()
+        };
+        try {
+          localStorage.setItem(key, JSON.stringify(state));
+        } catch (e) {}
+        var badge = document.getElementById("badge-autosave");
+        if (badge) {
+          badge.innerText = "Menyimpan...";
+          badge.className = "bg-yellow-500/20 text-yellow-300 text-xs px-2 py-0.5 rounded font-semibold transition-all duration-300";
+          setTimeout(function() {
+            badge.innerText = "Tersimpan";
+            badge.className = "bg-emerald-500/20 text-emerald-300 text-xs px-2 py-0.5 rounded font-semibold transition-all duration-300";
+          }, 800);
+        }
+      }
+
+      async function verifikasiKodeRemedial() {
+        var inputEl = document.getElementById("input-kode-remedial");
+        var errEl = document.getElementById("pesan-error-remedial");
+        var kode = inputEl.value.trim();
+
+        if (!kode) {
+          errEl.innerText = "Masukkan kode izin remedial dari panitia.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+
+        if (kode !== KODE_REMEDIAL_PANITIA) {
+          errEl.innerText = "Kode panitia salah! Ujian ulang tidak diizinkan.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+
+        errEl.classList.add("hidden");
+        isIzinRemedialAktif = true;
+
+        if (ujianTertundaRemedial) {
+          hapusTandaSelesaiLokal(dataUserAktif.nisn, ujianTertundaRemedial.mapel);
+        }
+
+        document.getElementById("box-remedial-panitia").classList.add("hidden");
+        inputEl.value = "";
+
+        if (ujianTertundaRemedial) {
+          await lanjutkanMuatSoalSetelahValidasi(ujianTertundaRemedial, true);
+        }
+      }
+
+      async function tombolSubmitToken() {
+        var t = document.getElementById("input-token").value.trim();
+        var err = document.getElementById("pesan-error-token");
+        var boxRemedial = document.getElementById("box-remedial-panitia");
+        boxRemedial.classList.add("hidden");
+        ujianTertundaRemedial = null;
+        isIzinRemedialAktif = false;
+
+        if (t === "") {
+          err.innerText = "Token wajib diisi!";
+          err.classList.remove("hidden");
+          return;
+        }
+        err.classList.add("hidden");
+        document.getElementById("btn-token").innerText = "Memverifikasi...";
+        document.getElementById("btn-token").disabled = true;
+
+        await pastikanTercatatHadir("submit_token");
+
+        try {
+          var snap = await db.collection("master_ujian").where("token", "==", t).limit(1).get();
+          if (snap.empty) {
+            document.getElementById("btn-token").innerText = "Submit Data & Token";
+            document.getElementById("btn-token").disabled = false;
+            err.innerText = "Token Ujian salah atau tidak ditemukan!";
+            err.classList.remove("hidden");
+            return;
+          }
+
+          var ujian = snap.docs[0].data();
+          var now = new Date();
+          var sisaDetik = 3600;
+
+          if (ujian.tanggal && ujian.jamMulai && ujian.jamSelesai) {
+            var pTgl = ujian.tanggal.split("-");
+            var yyyy = parseInt(pTgl[0], 10), mm = parseInt(pTgl[1], 10) - 1, dd = parseInt(pTgl[2], 10);
+            var sM = ujian.jamMulai.split(":");
+            var startTime = new Date(yyyy, mm, dd, parseInt(sM[0], 10), parseInt(sM[1], 10), 0);
+            var sS = ujian.jamSelesai.split(":");
+            var endTime = new Date(yyyy, mm, dd, parseInt(sS[0], 10), parseInt(sS[1], 10), 0);
+
+            if (now < startTime) {
+              document.getElementById("btn-token").innerText = "Submit Data & Token";
+              document.getElementById("btn-token").disabled = false;
+              err.innerText = "Ujian belum dimulai! Jadwal: " + ujian.jamMulai;
+              err.classList.remove("hidden");
+              return;
+            }
+            if (now > endTime) {
+              document.getElementById("btn-token").innerText = "Submit Data & Token";
+              document.getElementById("btn-token").disabled = false;
+              err.innerText = "Waktu Ujian sudah berakhir pada " + ujian.jamSelesai;
+              err.classList.remove("hidden");
+              return;
+            }
+            sisaDetik = Math.floor((endTime.getTime() - now.getTime()) / 1000);
+          }
+
+          if (!ujian.formId) {
+            document.getElementById("btn-token").innerText = "Submit Data & Token";
+            document.getElementById("btn-token").disabled = false;
+            err.innerText = "ID Google Form belum tersinkron di Master Ujian.";
+            err.classList.remove("hidden");
+            return;
+          }
+
+          dataUserAktif.mapel = ujian.mapel;
+          await pastikanTercatatHadir("token_valid");
+
+          document.getElementById("btn-token").innerText = "Memeriksa Riwayat Ujian...";
+          var statusRiwayat = await cekSudahSelesaiDiServer(dataUserAktif.nisn, ujian.mapel);
+          if (statusRiwayat.sudahSelesai) {
+            document.getElementById("btn-token").innerText = "Submit Data & Token";
+            document.getElementById("btn-token").disabled = false;
+            ujianTertundaRemedial = {
+              mapel: ujian.mapel,
+              formId: ujian.formId,
+              token: t,
+              sisaDetik: sisaDetik
+            };
+            document.getElementById("teks-info-sudah-selesai").innerText =
+              "Anda sudah menyelesaikan ujian \"" + ujian.mapel + "\" (Status: " + statusRiwayat.info + "). Setiap siswa hanya bisa mengirimkan jawaban 1 kali. Untuk remedial, masukkan kode izin panitia di bawah ini:";
+            document.getElementById("pesan-error-remedial").classList.add("hidden");
+            boxRemedial.classList.remove("hidden");
+            return;
+          }
+
+          await lanjutkanMuatSoalSetelahValidasi({
+            mapel: ujian.mapel,
+            formId: ujian.formId,
+            token: t,
+            sisaDetik: sisaDetik
+          }, false);
+        } catch (e) {
+          document.getElementById("btn-token").innerText = "Submit Data & Token";
+          document.getElementById("btn-token").disabled = false;
+          err.innerText = "Terjadi kesalahan: " + e.message;
+          err.classList.remove("hidden");
+        }
+      }
+
+      async function lanjutkanMuatSoalSetelahValidasi(paketUjian, modeRemedial) {
+        var err = document.getElementById("pesan-error-token");
+        document.getElementById("btn-token").innerText = "Mengambil Soal...";
+        document.getElementById("btn-token").disabled = true;
+
+        try {
+          dataUserAktif.mapel = paketUjian.mapel;
+          dataUserAktif.formId = paketUjian.formId;
+          dataUserAktif.token = paketUjian.token;
+          dataUserAktif.sisaDetik = paketUjian.sisaDetik;
+
+          var chunksSnap = await db.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
+          var dataSoalBaru = [];
+          chunksSnap.forEach(function(doc) {
+            var arr = JSON.parse(doc.data().itemsJson || "[]");
+            dataSoalBaru = dataSoalBaru.concat(arr);
+          });
+
+          document.getElementById("btn-token").innerText = "Submit Data & Token";
+          document.getElementById("btn-token").disabled = false;
+
+          if (dataSoalBaru.length === 0) {
+            err.innerText = "Soal belum di-Push ke Firebase oleh Admin! Jalankan menu 'Push Semua Soal Google Form' di Google Sheet.";
+            err.classList.remove("hidden");
+            return;
+          }
+
+          for (var k = 0; k < dataSoalBaru.length; k++) {
+            dataSoalBaru[k].no = k + 1;
+          }
+
+          document.getElementById("konfirmasi-data-page").classList.add("hidden");
+          document.getElementById("konfirmasi-tes-page").classList.remove("hidden");
+          document.getElementById("kt-mapel").innerText = dataUserAktif.mapel;
+          var d = new Date();
+          document.getElementById("kt-waktu").innerText = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+
+          var savedData = modeRemedial ? null : localStorage.getItem("CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel);
+          var isResume = false;
+          jumlahPelanggaran = 0;
+          countdownAktifSoalIndex = null;
+          jawabanSiswa = {};
+          statusRagu = {};
+          soalSudahPernahDibuka = {};
+          indeksSoalSekarang = 0;
+          isSedangMengumpulkan = false;
+
+          if (savedData) {
+            var p = JSON.parse(savedData);
+            var umurJam = (new Date().getTime() - p.timestamp) / (1000 * 60 * 60);
+            if (umurJam < 12) {
+              isResume = true;
+              jawabanSiswa = p.jawaban || {};
+              statusRagu = p.ragu || {};
+              totalDetikUjian = dataUserAktif.sisaDetik;
+              soalSudahPernahDibuka = p.dibuka || {};
+              jumlahPelanggaran = parseInt(p.pelanggaran, 10) || 0;
+              isIzinRemedialAktif = !!p.isRemedial;
+            }
+          }
+
+          bankSoal = dataSoalBaru;
+          totalDetikUjian = dataUserAktif.sisaDetik;
+
+          if (modeRemedial || isIzinRemedialAktif) {
+            document.getElementById("kt-status").innerText = "Ujian Remedial (Izin Panitia)";
+            document.getElementById("kt-status").className = "text-amber-400 font-semibold";
+          } else if (isResume) {
+            document.getElementById("kt-status").innerText = "Melanjutkan Ujian (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")";
+            document.getElementById("kt-status").className = "text-yellow-400 font-semibold";
+          } else {
+            document.getElementById("kt-status").innerText = "Tes Baru";
+            document.getElementById("kt-status").className = "text-emerald-400 font-semibold";
+          }
+          document.getElementById("kt-sisa").innerText = Math.floor(totalDetikUjian / 60) + " Menit " + (totalDetikUjian % 60) + " Detik";
+        } catch (e) {
+          document.getElementById("btn-token").innerText = "Submit Data & Token";
+          document.getElementById("btn-token").disabled = false;
+          err.innerText = "Terjadi kesalahan memuat soal: " + e.message;
+          err.classList.remove("hidden");
+        }
+      }
+
+      async function mulaiUjianFinal() {
+        if (bankSoal.length === 0) {
+          alert("Sedang menyiapkan soal, tunggu sebentar lalu klik lagi.");
+          return;
+        }
+        aktifkanLayarPenuh();
+        aktifkanWatermark();
+
+        await pastikanTercatatHadir("mulai_ujian");
+
+        document.getElementById("konfirmasi-tes-page").classList.add("hidden");
+        document.getElementById("siswa-page").classList.remove("hidden");
+        document.getElementById("info-nama-siswa").innerText = dataUserAktif.nama + " (" + dataUserAktif.kelas + ")";
+        document.getElementById("info-mapel-badge").innerText = dataUserAktif.mapel + (isIzinRemedialAktif ? " [REMEDIAL]" : "");
+
+        statusUjianBerlangsung = true;
+        mulaiTimerUjian();
+        tampilkanSoal(indeksSoalSekarang);
+
+        try {
+          var doc = await db.collection("log_absensi").doc(getAbsensiDocId(dataUserAktif.nisn)).get();
+          if (doc.exists && doc.data().statusSesi === "TERKUNCI") {
+            eksekusiPelanggaran("Mendeteksi status masih terkunci di server.");
+          }
+        } catch (e) {}
+      }
+
+      function mulaiTimerUjian() {
+        if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+        intervalTimerUjian = setInterval(function() {
+          if (!statusUjianBerlangsung) return;
+          totalDetikUjian--;
+          var jam = Math.floor(totalDetikUjian / 3600), menit = Math.floor((totalDetikUjian % 3600) / 60), detik = totalDetikUjian % 60;
+          document.getElementById("timer-ujian").innerText = (jam < 10 ? "0" + jam : jam) + ":" + (menit < 10 ? "0" + menit : menit) + ":" + (detik < 10 ? "0" + detik : detik);
+          if (totalDetikUjian % 15 === 0) saveStateToLocal();
+          if (totalDetikUjian <= 0) {
+            clearInterval(intervalTimerUjian);
+            if (timerSoalInterval) clearInterval(timerSoalInterval);
+            countdownAktifSoalIndex = null;
+            statusUjianBerlangsung = false;
+            alert("⏰ Waktu ujian habis!");
+            prosesPengumpulanNilai("Waktu Habis");
+          }
+        }, 1000);
+      }
+
+      function perbaruiStatusNavigasiTerkunci() {
+        var infoLock = document.getElementById("info-lock-navigasi");
+        if (!infoLock) return;
+        if (isCountdownSedangBerjalan()) {
+          infoLock.classList.remove("hidden");
+          infoLock.innerText = "Tunggu " + detiktersisa + "s";
+        } else {
+          infoLock.classList.add("hidden");
+          infoLock.innerText = "";
+        }
+      }
+
+      function tampilkanSoal(i, dariNavigasi) {
+        if (i < 0 || i >= bankSoal.length) return;
+
+        if (i !== indeksSoalSekarang && isCountdownSedangBerjalan()) {
+          if (dariNavigasi) {
+            alert("Selesaikan waktu tunggu (" + detiktersisa + " detik) pada soal ini sebelum berpindah ke soal lain.");
+          }
+          renderNavigasiGrid();
+          return;
+        }
+
+        indeksSoalSekarang = i;
+        var soal = bankSoal[i];
+        document.getElementById("label-nomor-soal").innerText = "Soal Nomor " + (i + 1) + " dari " + bankSoal.length;
+
+        var teks = soal.pertanyaan ? String(soal.pertanyaan) : "";
+        var deskripsi = soal.deskripsi ? String(soal.deskripsi) : "";
+        var daftarGambar = (soal.gambarList && soal.gambarList.length > 0) ? soal.gambarList.slice() : (soal.gambar ? [soal.gambar] : []);
+
+        var match = teks.match(/\[GAMBAR:\s*(.+?)\]/i);
+        if (match && match[1]) {
+          var manualImg = match[1].trim();
+          teks = teks.replace(/\[GAMBAR:\s*(.+?)\]/i, "");
+          var idMatch = manualImg.match(/\/d\/([a-zA-Z0-9-_]+)/);
+          if (idMatch && idMatch[1]) manualImg = "https://drive.google.com/uc?export=view&id=" + idMatch[1];
+          daftarGambar.push(manualImg);
+        }
+
+        var htmlSoal = "";
+        if (teks.trim() !== "") {
+          htmlSoal += '<p class="whitespace-pre-line">' + teks + "</p>";
+        }
+        if (deskripsi.trim() !== "") {
+          htmlSoal += '<p class="whitespace-pre-line text-slate-300 text-xs md:text-sm mt-2">' + deskripsi + "</p>";
+        }
+        if (daftarGambar.length > 0) {
+          daftarGambar.forEach(function(srcUrl) {
+            if (srcUrl) {
+              htmlSoal += '<div class="mt-4 flex justify-center"><img src="' + srcUrl + '" class="max-w-full max-h-[420px] object-contain bg-white p-2 rounded-lg border border-slate-600 shadow"></div>';
+            }
+          });
+        }
+        document.getElementById("teks-pertanyaan-container").innerHTML = htmlSoal;
+
+        var areaOpsi = document.getElementById("area-opsi");
+        areaOpsi.innerHTML = "";
+        [
+          { h: "A", t: soal.opsiA, img: soal.opsiAImg },
+          { h: "B", t: soal.opsiB, img: soal.opsiBImg },
+          { h: "C", t: soal.opsiC, img: soal.opsiCImg },
+          { h: "D", t: soal.opsiD, img: soal.opsiDImg },
+          { h: "E", t: soal.opsiE, img: soal.opsiEImg }
+        ].forEach(function(o) {
+          var hasText = o.t && String(o.t).trim() !== "";
+          var hasImg = o.img && String(o.img).trim() !== "";
+          if (hasText || hasImg) {
+            var chk = (jawabanSiswa[i] === o.h) ? "checked" : "";
+            var opsiImgHtml = hasImg ? '<div class="mt-2"><img src="' + o.img + '" class="max-h-36 object-contain bg-white p-1.5 rounded border border-slate-600"></div>' : "";
+            areaOpsi.innerHTML += '<label class="flex items-start p-3 bg-slate-800 border border-slate-700 rounded cursor-pointer hover:border-cyan-500"><input type="radio" name="pilihan" value="' + o.h + '" onchange="simpanJawaban(\'' + o.h + '\')" class="w-4 h-4 mt-1 text-cyan-500 shrink-0" ' + chk + '><div class="ml-3 text-slate-200 text-sm w-full"><span><strong>' + o.h + '.</strong> ' + (hasText ? o.t : "") + '</span>' + opsiImgHtml + '</div></label>';
+          }
+        });
+
+        document.getElementById("btn-prev").classList.toggle("hidden", i === 0);
+        document.getElementById("btn-selesai").classList.toggle("hidden", i !== bankSoal.length - 1);
+        var btnNext = document.getElementById("btn-next");
+
+        if (isPreviewMode || soalSudahPernahDibuka[i]) {
+          if (countdownAktifSoalIndex === i) {
+            if (timerSoalInterval) clearInterval(timerSoalInterval);
+            countdownAktifSoalIndex = null;
+          }
+          btnNext.disabled = isCountdownSedangBerjalan();
+          btnNext.innerText = "Selanjutnya »";
+          btnNext.className = isCountdownSedangBerjalan()
+            ? "bg-slate-700 text-slate-400 font-bold py-2.5 px-6 rounded-lg text-sm cursor-not-allowed"
+            : "bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm";
+        } else {
+          if (countdownAktifSoalIndex !== i) {
+            if (timerSoalInterval) clearInterval(timerSoalInterval);
+            countdownAktifSoalIndex = i;
+            detiktersisa = DURASI_COUNTDOWN_SOAL;
+            btnNext.disabled = true;
+            btnNext.className = "bg-slate-700 text-slate-400 font-bold py-2.5 px-6 rounded-lg text-sm cursor-not-allowed";
+            btnNext.innerText = "Tunggu (" + detiktersisa + "s)";
+            perbaruiStatusNavigasiTerkunci();
+
+            timerSoalInterval = setInterval(function() {
+              if (!statusUjianBerlangsung) return;
+              if (isTerkunci) return;
+              detiktersisa--;
+              if (detiktersisa > 0) {
+                if (indeksSoalSekarang === i) {
+                  btnNext.disabled = true;
+                  btnNext.innerText = "Tunggu (" + detiktersisa + "s)";
+                }
+                perbaruiStatusNavigasiTerkunci();
+              } else {
+                clearInterval(timerSoalInterval);
+                timerSoalInterval = null;
+                countdownAktifSoalIndex = null;
+                detiktersisa = 0;
+                soalSudahPernahDibuka[i] = true;
+                perbaruiStatusNavigasiTerkunci();
+                if (indeksSoalSekarang === i) {
+                  btnNext.disabled = false;
+                  btnNext.innerText = "Selanjutnya »";
+                  btnNext.className = "bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm";
+                }
+                renderNavigasiGrid();
+                saveStateToLocal();
+              }
+            }, 1000);
+          } else {
+            btnNext.disabled = true;
+            btnNext.className = "bg-slate-700 text-slate-400 font-bold py-2.5 px-6 rounded-lg text-sm cursor-not-allowed";
+            btnNext.innerText = "Tunggu (" + detiktersisa + "s)";
+          }
+        }
+
+        perbaruiStatusNavigasiTerkunci();
+        renderNavigasiGrid();
+      }
+
+      function simpanJawaban(h) {
+        jawabanSiswa[indeksSoalSekarang] = h;
+        statusRagu[indeksSoalSekarang] = false;
+        renderNavigasiGrid();
+        saveStateToLocal();
+      }
+
+      function tandaiRagu() {
+        if (!jawabanSiswa[indeksSoalSekarang]) {
+          alert("Pilih jawaban dulu!");
+          return;
+        }
+        statusRagu[indeksSoalSekarang] = !statusRagu[indeksSoalSekarang];
+        renderNavigasiGrid();
+        saveStateToLocal();
+      }
+
+      function renderNavigasiGrid() {
+        var grid = document.getElementById("panel-navigasi-grid");
+        grid.innerHTML = "";
+        var terkunciCountdown = isCountdownSedangBerjalan();
+
+        for (var i = 0; i < bankSoal.length; i++) {
+          var w = "bg-slate-700 text-slate-300 border-slate-600";
+          if (i === indeksSoalSekarang) w = "bg-cyan-600 text-white font-bold ring-2 ring-cyan-400/50";
+          else if (statusRagu[i]) w = "bg-yellow-500 text-slate-950 font-bold";
+          else if (jawabanSiswa[i]) w = "bg-blue-600 text-white";
+
+          var isBtnDisabled = terkunciCountdown && i !== indeksSoalSekarang;
+          var extraClass = isBtnDisabled ? " opacity-45 cursor-not-allowed" : "";
+
+          grid.innerHTML += '<button type="button" ' + (isBtnDisabled ? "disabled " : "") +
+            'onclick="tampilkanSoal(' + i + ', true)" class="w-10 h-10 rounded text-xs font-bold border flex items-center justify-center ' + w + extraClass + '">' + (i + 1) + "</button>";
+        }
+      }
+
+      function soalSelanjutnya() {
+        if (isCountdownSedangBerjalan()) {
+          alert("Tunggu countdown (" + detiktersisa + " detik) selesai sebelum ke soal berikutnya.");
+          return;
+        }
+        if (indeksSoalSekarang < bankSoal.length - 1) tampilkanSoal(indeksSoalSekarang + 1, false);
+      }
+
+      function soalSebelumnya() {
+        if (isCountdownSedangBerjalan()) {
+          alert("Tunggu countdown (" + detiktersisa + " detik) selesai sebelum berpindah soal.");
+          return;
+        }
+        if (indeksSoalSekarang > 0) tampilkanSoal(indeksSoalSekarang - 1, false);
+      }
+
+      function selesaiUjian() {
+        if (isPreviewMode) {
+          var jumlahSoal = bankSoal.length;
+          var jawabanBenar = 0;
+          for (var i = 0; i < bankSoal.length; i++) {
+            var jwb = jawabanSiswa[i];
+            if (jwb && bankSoal[i].kunci && String(jwb).toUpperCase() === String(bankSoal[i].kunci).toUpperCase()) {
+              jawabanBenar++;
+            }
+          }
+          var nilaiSimulasi = (jumlahSoal > 0) ? Math.round((jawabanBenar / jumlahSoal) * 100) : 0;
+          alert("SIMULASI PREVIEW SELESAI\nBenar: " + jawabanBenar + " dari " + jumlahSoal + " soal\nSkor Simulasi: " + nilaiSimulasi + "\n\n(Data tidak dikirim ke Firestore/Rekap Nilai)");
+          return;
+        }
+
+        if (isSedangMengumpulkan) return;
+
+        if (isCountdownSedangBerjalan()) {
+          alert("Tunggu countdown (" + detiktersisa + " detik) selesai sebelum mengakhiri ujian.");
+          return;
+        }
+        if (!confirm("Yakin mengakhiri ujian? Jawaban hanya dapat dikirim 1 kali dan tidak dapat diulang tanpa kode panitia.")) return;
+        statusUjianBerlangsung = false;
+        if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+        prosesPengumpulanNilai("Selesai");
+      }
+
+      async function prosesPengumpulanNilai(ket) {
+        if (isPreviewMode || isSedangMengumpulkan) return;
+        isSedangMengumpulkan = true;
+
+        var btnSelesaiEl = document.getElementById("btn-selesai");
+        if (btnSelesaiEl) {
+          btnSelesaiEl.disabled = true;
+          btnSelesaiEl.innerText = "Mengirim Jawaban...";
+        }
+
+        hentikanListenerKunci();
+        if (timerSoalInterval) {
+          clearInterval(timerSoalInterval);
+          timerSoalInterval = null;
+        }
+        countdownAktifSoalIndex = null;
+        saveStateToLocal();
+
+        await pastikanTercatatHadir("selesai_ujian");
+
+        var jumlahSoal = bankSoal.length;
+        var jawabanBenar = 0;
+        for (var i = 0; i < bankSoal.length; i++) {
+          var jwb = jawabanSiswa[i];
+          if (jwb && bankSoal[i].kunci && String(jwb).toUpperCase() === String(bankSoal[i].kunci).toUpperCase()) {
+            jawabanBenar++;
+          }
+        }
+        var nilaiAkhir = (jumlahSoal > 0) ? Math.round((jawabanBenar / jumlahSoal) * 100) : 0;
+        var now = new Date();
+        var tglView = String(now.getDate()).padStart(2, "0") + "/" + String(now.getMonth() + 1).padStart(2, "0") + "/" + now.getFullYear() + " " + String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+        var jamView = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") + ":" + String(now.getSeconds()).padStart(2, "0");
+        var catatanAkhir = ket ? ket : "Selesai";
+        if (isIzinRemedialAktif) {
+          catatanAkhir = catatanAkhir + " (Remedial)";
+        }
+
+        var payloadRekap = {
+          tipe: "rekap_nilai",
+          source: isIzinRemedialAktif ? "github_firestore_remedial" : "github_firestore_fallback",
+          waktuSelesai: now.toISOString(),
+          waktuView: tglView,
+          jamView: jamView,
+          tanggal: getTodayStr(),
+          nisn: dataUserAktif.nisn,
+          noPeserta: dataUserAktif.noPeserta,
+          nama: dataUserAktif.nama,
+          kelas: dataUserAktif.kelas,
+          angkatan: dataUserAktif.angkatan || "",
+          mapel: dataUserAktif.mapel,
+          nilaiAkhir: nilaiAkhir,
+          jumlahPelanggaran: jumlahPelanggaran,
+          isRemedial: isIzinRemedialAktif,
+          jawabanRaw: jawabanSiswa,
+          status: catatanAkhir
+        };
+
+        tandaiSelesaiLokal(dataUserAktif.nisn, dataUserAktif.mapel, catatanAkhir);
+
+        var suffixRemedial = isIzinRemedialAktif ? "_REM_" + now.getTime() : "";
+        var backupIdRekap = "REKAP_" + getTodayStr() + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(dataUserAktif.mapel) + suffixRemedial;
+        var tersimpanUtama = false;
+        var tersimpanCadangan = false;
+
+        try {
+          var docId = getTodayStr() + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(dataUserAktif.mapel) + suffixRemedial;
+          await db.collection("rekap_nilai").doc(docId).set(payloadRekap);
+          tersimpanUtama = true;
+        } catch (errFirestore) {
+          masukAntreanBackup({ id: backupIdRekap, payload: payloadRekap });
+          tersimpanCadangan = await kirimKeWebAppBackup(payloadRekap);
+          if (tersimpanCadangan) {
+            hapusDariAntreanBackup(backupIdRekap);
+          }
+        }
+
+        if (tersimpanUtama) {
+          var sessKey = getSessionStorageKey();
+          if (sessKey) localStorage.removeItem(sessKey);
+        }
+
+        var ketSimpan = tersimpanUtama
+          ? "Jawaban berhasil terekam di server Firebase."
+          : (tersimpanCadangan
+            ? "Server/kuota utama sedang bermasalah; data dikirim ke server cadangan dan salinan lokal tetap dijaga. Tunjukkan layar ini ke pengawas sebelum keluar."
+            : "Pengiriman ke server/cadangan tertunda. Nilai tetap tersimpan di perangkat ini—klik Kirim Ulang Sekarang atau lapor ke pengawas.");
+
+        document.getElementById("dynamic-watermark").classList.add("hidden");
+        document.getElementById("siswa-page").innerHTML = `
+          <div class="text-center py-14 px-4">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-2">UJIAN SELESAI</h2>
+            <p class="text-slate-300 text-sm mb-2">Status: <span class="font-bold text-amber-300">${catatanAkhir}</span></p>
+            <p class="text-slate-400 text-sm mb-6 max-w-xl mx-auto">${ketSimpan}</p>
+            <div class="text-6xl font-black text-cyan-400 mb-6">${nilaiAkhir}</div>
+            <div class="backup-banner hidden text-xs text-amber-300 bg-amber-950/50 border border-amber-700/50 rounded-lg px-4 py-2.5 max-w-md mx-auto mb-6"></div>
+            <button onclick="logoutSiswa()" class="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2.5 rounded text-sm font-bold">Kembali ke Awal</button>
+          </div>`;
+        perbaruiBannerBackup();
+      }
+    </script>
+  </body>
+</html>
