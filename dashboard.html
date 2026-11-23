@@ -123,11 +123,23 @@
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
               <div>
                 <h2 class="text-xl font-bold text-slate-800">Monitoring Ruang Ujian & Absensi</h2>
-                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Klik Refresh atau aktifkan Auto-60d untuk memperbarui status kehadiran & kunci siswa.</p>
+                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Klik Refresh atau aktifkan Auto-60d untuk memperbarui status kehadiran, jadwal & kunci siswa.</p>
               </div>
               <div class="flex gap-2 w-full md:w-auto flex-wrap items-center">
                 <input type="text" id="search-ruang" onkeyup="cariTabel('search-ruang', 'tb-ruang-ujian')" placeholder="Cari siswa..." class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                <select id="filter-ruang" onchange="muatDataRuangUjian(true)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Ruangan</option></select>
+
+                <select id="filter-angkatan-ruang" onchange="muatDataRuangUjian(true)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                  <option value="Semua">Semua Angkatan</option>
+                </select>
+
+                <select id="filter-ruang" onchange="muatDataRuangUjian(true)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                  <option value="Semua">Semua Ruangan</option>
+                </select>
+
+                <select id="filter-mapel-ruang" onchange="muatDataRuangUjian(true)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                  <option value="Semua">Semua Mapel Ujian</option>
+                </select>
+
                 <button onclick="muatDataRuangUjian(true)" class="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-sync-alt"></i> Refresh</button>
                 <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-2 rounded-lg cursor-pointer">
                   <input type="checkbox" id="chk-auto-ruang" onchange="toggleAutoRefreshRuang()"> Auto 60d
@@ -141,7 +153,7 @@
               <div class="bg-red-50 p-4 rounded-lg border border-red-200"><div class="text-red-600 text-xs font-bold uppercase">Belum Hadir</div><div class="text-2xl font-black text-red-700" id="r-belum">0</div></div>
             </div>
 
-            <div class="overflow-x-auto"><table class="w-full text-left text-sm whitespace-nowrap"><thead class="bg-slate-50 text-slate-500 text-xs uppercase font-bold"><tr><th class="px-4 py-3">Nama Siswa</th><th class="px-4 py-3">Kelas</th><th class="px-4 py-3">Ruang</th><th class="px-4 py-3 text-center">Status Hadir</th><th class="px-4 py-3">Jam Login</th><th class="px-4 py-3">Status Pengerjaan</th></tr></thead><tbody class="divide-y divide-slate-100 text-slate-700" id="tb-ruang-ujian"><tr><td colspan="6" class="text-center py-4">Memuat data...</td></tr></tbody></table></div>
+            <div class="overflow-x-auto"><table class="w-full text-left text-sm whitespace-nowrap"><thead class="bg-slate-50 text-slate-500 text-xs uppercase font-bold"><tr><th class="px-4 py-3">Nama Siswa</th><th class="px-4 py-3">Kelas / Angk.</th><th class="px-4 py-3">Ruang</th><th class="px-4 py-3 text-center">Status Hadir</th><th class="px-4 py-3">Jam Login</th><th class="px-4 py-3">Status Pengerjaan & Jadwal</th></tr></thead><tbody class="divide-y divide-slate-100 text-slate-700" id="tb-ruang-ujian"><tr><td colspan="6" class="text-center py-4">Memuat data...</td></tr></tbody></table></div>
           </div>
         </div>
 
@@ -564,7 +576,7 @@
         if (chk) chk.checked = false;
       }
 
-      if (pageId === "page-ruang-ujian") muatDataRuangUjian(false);
+      if (pageId === "page-ruang-ujian") muatDataRuangUjian(true);
       else if (pageId === "page-dashboard-admin") refreshAdminStats(false);
       else if (pageId === "page-data-siswa") loadDataSiswa(false);
       else if (pageId === "page-data-guru") loadDataGuru(false);
@@ -647,12 +659,58 @@
       });
     }
 
+    function ekstrakAngkatanSiswa(siswa) {
+      if (siswa && String(siswa.angkatan || "").trim() !== "") {
+        return String(siswa.angkatan).trim();
+      }
+      var kls = String((siswa && siswa.kelas) || "").trim().toUpperCase();
+      if (kls.startsWith("XII ")) return "XII";
+      if (kls.startsWith("XI ")) return "XI";
+      if (kls.startsWith("X ")) return "X";
+      return "Belum Set Angkatan";
+    }
+
+    function evaluasiStatusJadwalAktif(jadwalObj, nowDate) {
+      if (!jadwalObj) {
+        return { label: "Tanpa Jadwal", kode: "NORMAL" };
+      }
+      if (String(jadwalObj.status || "").toLowerCase() === "selesai") {
+        return { label: "Jadwal Ditutup/Selesai", kode: "DITUTUP" };
+      }
+      if (jadwalObj.tanggal && jadwalObj.jamMulai && jadwalObj.jamSelesai) {
+        var pTgl = String(jadwalObj.tanggal).split("-");
+        if (pTgl.length === 3) {
+          var yyyy = parseInt(pTgl[0], 10);
+          var mm = parseInt(pTgl[1], 10) - 1;
+          var dd = parseInt(pTgl[2], 10);
+          var sM = String(jadwalObj.jamMulai).split(":");
+          var sS = String(jadwalObj.jamSelesai).split(":");
+          var startTime = new Date(yyyy, mm, dd, parseInt(sM[0] || 0, 10), parseInt(sM[1] || 0, 10), 0);
+          var endTime = new Date(yyyy, mm, dd, parseInt(sS[0] || 23, 10), parseInt(sS[1] || 59, 10), 59);
+
+          if (nowDate < startTime) {
+            return { label: "Belum Dimulai (" + jadwalObj.jamMulai + ")", kode: "BELUM_MULAI" };
+          }
+          if (nowDate > endTime) {
+            return { label: "Waktu Habis (" + jadwalObj.jamSelesai + ")", kode: "HABIS" };
+          }
+          return { label: "Berlangsung (" + jadwalObj.jamMulai + "-" + jadwalObj.jamSelesai + ")", kode: "AKTIF" };
+        }
+      }
+      return { label: "Aktif", kode: "AKTIF" };
+    }
+
     async function muatDataRuangUjian(isManualRefresh) {
       var tb = document.getElementById("tb-ruang-ujian");
       var infoEl = document.getElementById("info-pantau-ruang");
+      var filterAngkatanEl = document.getElementById("filter-angkatan-ruang");
       var filterRuangEl = document.getElementById("filter-ruang");
+      var filterMapelEl = document.getElementById("filter-mapel-ruang");
+
       var isPengawas = currentUser && currentUser.role === "pengawas";
+      var angkatanTarget = filterAngkatanEl ? filterAngkatanEl.value : "Semua";
       var ruangTarget = isPengawas ? currentUser.ruang : (filterRuangEl ? filterRuangEl.value : "Semua");
+      var mapelTarget = filterMapelEl ? filterMapelEl.value : "Semua";
 
       if (isPengawas && filterRuangEl) {
         filterRuangEl.innerHTML = `<option value="${escapeAttr(currentUser.ruang)}">${escapeAttr(currentUser.ruang)}</option>`;
@@ -664,35 +722,79 @@
         return;
       }
 
-      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat data ruang...</td></tr>';
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat data ruang & jadwal...</td></tr>';
 
       try {
+        var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", true);
+
         var siswaList = [];
         if (isPengawas) {
           var pSiswaSnap = await db.collection("data_siswa").where("ruang", "==", currentUser.ruang).get();
           pSiswaSnap.forEach(function(doc) { siswaList.push(doc.data()); });
         } else {
           siswaList = await getMasterCollectionCached("data_siswa", "siswa", false);
+
+          var unikAngkatan = [];
+          siswaList.forEach(function(s) {
+            var a = ekstrakAngkatanSiswa(s);
+            if (unikAngkatan.indexOf(a) === -1) unikAngkatan.push(a);
+          });
+          unikAngkatan.sort();
+          var oldAng = filterAngkatanEl.value;
+          filterAngkatanEl.innerHTML = '<option value="Semua">Semua Angkatan</option>';
+          unikAngkatan.forEach(function(a) {
+            filterAngkatanEl.innerHTML += `<option value="${escapeAttr(a)}">${escapeAttr(a)}</option>`;
+          });
+          if (Array.from(filterAngkatanEl.options).some(function(o) { return o.value === oldAng; })) {
+            filterAngkatanEl.value = oldAng;
+          }
+          angkatanTarget = filterAngkatanEl.value;
+
           var unikRuang = [];
           siswaList.forEach(function(s) {
             var r = s.ruang || "Belum Set Ruang";
             if (unikRuang.indexOf(r) === -1) unikRuang.push(r);
           });
           unikRuang.sort();
-          var oldVal = filterRuangEl.value;
+          var oldRuang = filterRuangEl.value;
           filterRuangEl.innerHTML = '<option value="Semua">Semua Ruangan</option>';
           unikRuang.forEach(function(r) {
             filterRuangEl.innerHTML += `<option value="${escapeAttr(r)}">${escapeAttr(r)}</option>`;
           });
-          if (Array.from(filterRuangEl.options).some(function(o) { return o.value === oldVal; })) {
-            filterRuangEl.value = oldVal;
+          if (Array.from(filterRuangEl.options).some(function(o) { return o.value === oldRuang; })) {
+            filterRuangEl.value = oldRuang;
           }
           ruangTarget = filterRuangEl.value;
         }
 
-        var today = safeTodayStr();
-        var absenQuery = db.collection("log_absensi").where("tanggal", "==", today);
-        var rekapQuery = db.collection("rekap_nilai").where("tanggal", "==", today);
+        var unikMapel = [];
+        var mapJadwalByMapel = {};
+        jadwalList.forEach(function(j) {
+          var m = String(j.mapel || "").trim();
+          if (!m) return;
+          if (!mapJadwalByMapel[m]) mapJadwalByMapel[m] = j;
+          if (unikMapel.indexOf(m) === -1) unikMapel.push(m);
+        });
+        unikMapel.sort();
+        var oldMapel = filterMapelEl ? filterMapelEl.value : "Semua";
+        if (filterMapelEl) {
+          filterMapelEl.innerHTML = '<option value="Semua">Semua Mapel Ujian</option>';
+          unikMapel.forEach(function(m) {
+            var jd = mapJadwalByMapel[m];
+            var labelJam = (jd && jd.jamMulai && jd.jamSelesai) ? ` (${jd.jamMulai}-${jd.jamSelesai})` : "";
+            filterMapelEl.innerHTML += `<option value="${escapeAttr(m)}">${escapeAttr(m + labelJam)}</option>`;
+          });
+          if (Array.from(filterMapelEl.options).some(function(o) { return o.value === oldMapel; })) {
+            filterMapelEl.value = oldMapel;
+          }
+          mapelTarget = filterMapelEl.value;
+        }
+
+        var jadwalAktif = (mapelTarget && mapelTarget !== "Semua") ? (mapJadwalByMapel[mapelTarget] || null) : null;
+        var tglQuery = (jadwalAktif && jadwalAktif.tanggal) ? String(jadwalAktif.tanggal).trim() : safeTodayStr();
+
+        var absenQuery = db.collection("log_absensi").where("tanggal", "==", tglQuery);
+        var rekapQuery = db.collection("rekap_nilai").where("tanggal", "==", tglQuery);
 
         if (isPengawas) {
           absenQuery = absenQuery.where("ruang", "==", currentUser.ruang);
@@ -705,44 +807,83 @@
         var mapHadir = {};
         absenSnap.forEach(function(doc) {
           var d = doc.data();
-          mapHadir[String(d.nisn)] = {
+          var mLog = String(d.mapel || "").trim();
+          if (mapelTarget && mapelTarget !== "Semua" && mLog && mLog !== "-" && mLog !== mapelTarget) {
+            return;
+          }
+          mapHadir[String(d.nisn).trim()] = {
             jam: d.jamLogin || "-",
             statusSesi: d.statusSesi || "AKTIF",
-            catatan: d.catatan || "-"
+            catatan: d.catatan || "-",
+            mapel: mLog || "-"
           };
         });
 
         var mapSelesai = {};
         rekapSnap.forEach(function(doc) {
           var d = doc.data();
-          mapSelesai[String(d.nisn)] = d.status || "Selesai";
+          var mRekap = String(d.mapel || "").trim();
+          if (mapelTarget && mapelTarget !== "Semua" && mRekap && mRekap !== "-" && mRekap !== mapelTarget) {
+            return;
+          }
+          mapSelesai[String(d.nisn).trim()] = {
+            status: d.status || "Selesai",
+            jamView: d.jamView || "-",
+            mapel: mRekap || "-"
+          };
         });
+
+        var nowObj = new Date();
+        var infoJadwalDipilih = evaluasiStatusJadwalAktif(jadwalAktif, nowObj);
 
         var kandidatSiswa = siswaList.filter(function(s) {
           var r = s.ruang || "Belum Set Ruang";
-          return isPengawas || !ruangTarget || ruangTarget === "Semua" || r === ruangTarget;
+          var a = ekstrakAngkatanSiswa(s);
+          var cocokRuang = isPengawas || !ruangTarget || ruangTarget === "Semua" || r === ruangTarget;
+          var cocokAngkatan = !angkatanTarget || angkatanTarget === "Semua" || a === angkatanTarget;
+          return cocokRuang && cocokAngkatan;
         });
 
         dataRuangGlobal = kandidatSiswa.map(function(s) {
-          var nisnStr = String(s.nisn);
+          var nisnStr = String(s.nisn).trim();
+          var angStr = ekstrakAngkatanSiswa(s);
           var h = mapHadir[nisnStr] || null;
           var u = mapSelesai[nisnStr] || null;
+
+          var jadwalBerubahKeDepan = (mapelTarget !== "Semua" && infoJadwalDipilih.kode === "BELUM_MULAI" && !h && !u);
+          var sudahHadir = jadwalBerubahKeDepan ? false : !!(h || u);
+
+          var ketStatus = "-";
+          if (u) {
+            ketStatus = u.status + (u.mapel && u.mapel !== "-" ? " [" + u.mapel + "]" : "");
+          } else if (h) {
+            ketStatus = "Sedang Ujian" + (h.mapel && h.mapel !== "-" ? " [" + h.mapel + "]" : "");
+          } else if (mapelTarget && mapelTarget !== "Semua") {
+            ketStatus = infoJadwalDipilih.label;
+          } else {
+            ketStatus = "-";
+          }
+
           return {
             nisn: nisnStr,
             nama: s.nama,
             kelas: s.kelas,
+            angkatan: angStr,
             ruang: s.ruang || "Belum Set Ruang",
-            jamLogin: h ? h.jam : "-",
-            statusHadir: h ? "Hadir" : "Belum Hadir",
-            keterangan: u ? u : (h ? "Sedang Ujian" : "-"),
-            statusSesiLive: h ? h.statusSesi : "AKTIF",
-            catatanLock: h ? h.catatan : "-"
+            jamLogin: sudahHadir ? (h ? h.jam : (u ? u.jamView : "-")) : "-",
+            statusHadir: sudahHadir ? "Hadir" : "Belum Hadir",
+            keterangan: ketStatus,
+            statusSesiLive: sudahHadir && h ? h.statusSesi : "AKTIF",
+            catatanLock: sudahHadir && h ? h.catatan : "-"
           };
         });
 
         if (infoEl) {
           var jamUpdate = new Date().toLocaleTimeString("id-ID");
-          infoEl.innerText = "Terakhir diperbarui: " + jamUpdate + " • Filter: " + (isPengawas ? "Ruang " + currentUser.ruang : ruangTarget);
+          var labelMapel = (mapelTarget && mapelTarget !== "Semua")
+            ? (mapelTarget + " • " + infoJadwalDipilih.label + " (Tgl: " + tglQuery + ")")
+            : ("Semua Mapel (Tgl: " + tglQuery + ")");
+          infoEl.innerText = "Update: " + jamUpdate + " • Angkatan: " + angkatanTarget + " • Ruang: " + (isPengawas ? currentUser.ruang : ruangTarget) + " • Mapel: " + labelMapel;
         }
 
         renderTabelRuangAdmin();
@@ -753,19 +894,22 @@
 
     function renderTabelRuangAdmin() {
       var tb = document.getElementById("tb-ruang-ujian");
+      var fAngkatan = document.getElementById("filter-angkatan-ruang") ? document.getElementById("filter-angkatan-ruang").value : "Semua";
       var fRuang = document.getElementById("filter-ruang").value;
       if (currentUser && currentUser.role === "pengawas") {
         fRuang = currentUser.ruang;
       }
 
       var filtered = dataRuangGlobal.filter(function(item) {
-        return (fRuang === "Semua") || (item.ruang === fRuang);
+        var okRuang = (fRuang === "Semua") || (item.ruang === fRuang);
+        var okAng = (fAngkatan === "Semua") || (item.angkatan === fAngkatan);
+        return okRuang && okAng;
       });
       var tPeserta = 0, tHadir = 0, tBelum = 0;
       tb.innerHTML = "";
 
       if (filtered.length === 0) {
-        tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data di ruangan ini.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data sesuai filter.</td></tr>';
       } else {
         filtered.forEach(function(d) {
           tPeserta++;
@@ -782,7 +926,7 @@
             aksiUnlock = `<button onclick="bukaKunci('${escapeAttr(d.nisn)}', this)" class="mt-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-1.5 rounded shadow-sm w-full transition-all"><i class="fas fa-unlock"></i> Buka Kunci</button>`;
           }
 
-          tb.innerHTML += `<tr class="${rowBg} border-b border-slate-100 transition-colors"><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas)}</td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${d.statusHadir}</span></td><td class="px-4 py-3 font-mono">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td></tr>`;
+          tb.innerHTML += `<tr class="${rowBg} border-b border-slate-100 transition-colors"><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${d.statusHadir}</span></td><td class="px-4 py-3 font-mono">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td></tr>`;
         });
       }
 
