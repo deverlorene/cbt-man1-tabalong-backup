@@ -290,6 +290,96 @@
       var ujianTertundaRemedial = null;
       var isIzinRemedialAktif = false;
 
+      window.addEventListener("beforeunload", function(e) {
+        if (!isPreviewMode && statusUjianBerlangsung && !isSedangMengumpulkan) {
+          saveStateToLocal();
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+
+      function normalisasiMapelKunci(m) {
+        return String(m || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[-–—]/g, " ")
+          .replace(/[^a-z0-9 ]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function normalisasiNisnKunci(n) {
+        return String(n || "").trim().replace(/\.0$/, "").replace(/^0+/, "");
+      }
+
+      function ekstrakJenjangSiswa_(userObj) {
+        var ang = String((userObj && userObj.angkatan) || "").trim().toUpperCase();
+        if (ang === "XII" || ang === "XI" || ang === "X") return ang;
+        var kls = String((userObj && userObj.kelas) || "").trim().toUpperCase();
+        if (/^XII(\s|$|-|_)/.test(kls)) return "XII";
+        if (/^XI(\s|$|-|_)/.test(kls)) return "XI";
+        if (/^X(\s|$|-|_)/.test(kls)) return "X";
+        return "";
+      }
+
+      // Validasi kecocokan paket jadwal dengan data siswa (Mencegah salah soal saat token sama per sesi)
+      function isJadwalCocokDenganSiswa_(ujian, userObj) {
+        if (!ujian || !userObj) return true;
+        var kelasSiswa = String(userObj.kelas || "").trim().toUpperCase().replace(/\s+/g, " ");
+        var jenjangSiswa = ekstrakJenjangSiswa_(userObj);
+
+        var targetKelasRaw = String(ujian.kelas || "").trim().toUpperCase();
+        var mapelRaw = String(ujian.mapel || "").trim().toUpperCase();
+
+        // 1. Cek jenjang pada judul Mapel jika mencantumkan Kelas X / XI / XII
+        if (jenjangSiswa && /\bKELAS\b/.test(mapelRaw)) {
+          var matchMapelKelas = mapelRaw.match(/\bKELAS\s+(XII|XI|X)\b/);
+          if (matchMapelKelas && matchMapelKelas[1] && matchMapelKelas[1] !== jenjangSiswa) {
+            return false;
+          }
+        }
+
+        // 2. Jika kolom kelas umum, loloskan jika jenjang cocok
+        if (!targetKelasRaw || targetKelasRaw === "SEMUA KELAS" || targetKelasRaw === "SEMUA" || targetKelasRaw === "ALL") {
+          return true;
+        }
+
+        // 3. Jika hanya tertulis jenjang saja (misal: "KELAS X" / "X")
+        if (targetKelasRaw === "KELAS " + jenjangSiswa || targetKelasRaw === jenjangSiswa) {
+          return true;
+        }
+
+        // 4. Penguraian Rombel Gabungan: "KELAS X (A, B, C)" -> ["X A", "X B", "X C"]
+        var daftarRombelTarget = [];
+        var matchGrup = targetKelasRaw.match(/KELAS\s+(XII|XI|X)\s*\(([^)]+)\)/);
+        if (matchGrup) {
+          var jjg = matchGrup[1];
+          var hurufRombel = matchGrup[2].split(/[,;/]+/);
+          hurufRombel.forEach(function(h) {
+            var hClean = h.trim();
+            if (hClean) daftarRombelTarget.push(jjg + " " + hClean);
+          });
+        } else {
+          var splitBiasa = targetKelasRaw.replace(/\bKELAS\b/g, "").split(/[,;/]+/);
+          splitBiasa.forEach(function(s) {
+            var sClean = s.trim();
+            if (sClean) {
+              if (!sClean.startsWith("X ") && !sClean.startsWith("XI ") && !sClean.startsWith("XII ") && jenjangSiswa) {
+                daftarRombelTarget.push(jenjangSiswa + " " + sClean);
+              } else {
+                daftarRombelTarget.push(sClean);
+              }
+            }
+          });
+        }
+
+        if (daftarRombelTarget.length > 0) {
+          return daftarRombelTarget.indexOf(kelasSiswa) !== -1;
+        }
+
+        return true;
+      }
+
       function isCountdownSedangBerjalan() {
         if (isPreviewMode) return false;
         return countdownAktifSoalIndex !== null && detiktersisa > 0;
@@ -361,17 +451,20 @@
       function getSessionStorageKey() {
         if (isPreviewMode) return null;
         if (!dataUserAktif || !dataUserAktif.nisn || !dataUserAktif.mapel) return null;
-        return "CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel;
+        return "CBT_" + dataUserAktif.nisn + "_" + sanitizeId(normalisasiMapelKunci(dataUserAktif.mapel));
       }
 
       function getCompletedLockKey(nisn, mapel) {
-        return "CBT_DONE_" + sanitizeId(nisn) + "_" + sanitizeId(mapel);
+        return "CBT_DONE_" + normalisasiNisnKunci(nisn) + "_" + sanitizeId(normalisasiMapelKunci(mapel));
       }
 
       function cekSudahSelesaiLokal(nisn, mapel) {
         try {
           var raw = localStorage.getItem(getCompletedLockKey(nisn, mapel));
-          return raw ? JSON.parse(raw) : null;
+          if (raw) return JSON.parse(raw);
+
+          var rawLegacy = localStorage.getItem("CBT_DONE_" + sanitizeId(nisn) + "_" + sanitizeId(mapel));
+          return rawLegacy ? JSON.parse(rawLegacy) : null;
         } catch (e) {
           return null;
         }
@@ -379,18 +472,27 @@
 
       function tandaiSelesaiLokal(nisn, mapel, statusStr) {
         try {
-          localStorage.setItem(getCompletedLockKey(nisn, mapel), JSON.stringify({
+          var dataDone = JSON.stringify({
             status: statusStr || "Selesai",
             waktu: new Date().toISOString()
-          }));
+          });
+          localStorage.setItem(getCompletedLockKey(nisn, mapel), dataDone);
+          localStorage.setItem("CBT_DONE_" + sanitizeId(nisn) + "_" + sanitizeId(mapel), dataDone);
         } catch (e) {}
       }
 
       function hapusTandaSelesaiLokal(nisn, mapel) {
         try {
           localStorage.removeItem(getCompletedLockKey(nisn, mapel));
+          localStorage.removeItem("CBT_DONE_" + sanitizeId(nisn) + "_" + sanitizeId(mapel));
+          localStorage.removeItem("CBT_" + nisn + "_" + sanitizeId(normalisasiMapelKunci(mapel)));
           localStorage.removeItem("CBT_" + nisn + "_" + mapel);
         } catch (e) {}
+      }
+
+      function isStatusFinalValid(st) {
+        var s = String(st || "").trim().toLowerCase();
+        return s.indexOf("selesai") !== -1 || s.indexOf("diskualifikasi") !== -1 || s.indexOf("habis") !== -1;
       }
 
       async function cekSudahSelesaiDiServer(nisn, mapel) {
@@ -399,36 +501,43 @@
           return { sudahSelesai: true, info: lokalDone.status || "Selesai (Tercatat di perangkat)" };
         }
 
+        var mapelNormTarget = normalisasiMapelKunci(mapel);
+        var nisnNormTarget = normalisasiNisnKunci(nisn);
         var docIdHariIni = getTodayStr() + "_" + sanitizeId(nisn) + "_" + sanitizeId(mapel);
+
         try {
           var docToday = await db.collection("rekap_nilai").doc(docIdHariIni).get();
           if (docToday.exists) {
             var d1 = docToday.data() || {};
             var st1 = String(d1.status || "").trim();
-            if (st1.toLowerCase().indexOf("selesai") !== -1 || st1.toLowerCase().indexOf("diskualifikasi") !== -1 || st1.toLowerCase().indexOf("habis") !== -1) {
-              tandaiSelesaiLokal(nisn, mapel, st1);
-              return { sudahSelesai: true, info: st1 };
+            if (isStatusFinalValid(st1) || d1.nilaiAkhir !== undefined) {
+              tandaiSelesaiLokal(nisn, mapel, st1 || "Selesai");
+              return { sudahSelesai: true, info: st1 || "Selesai" };
             }
           }
 
-          var snapPrev = await db.collection("rekap_nilai")
-            .where("nisn", "==", String(nisn))
-            .where("mapel", "==", String(mapel))
-            .limit(5)
-            .get();
+          var kandidatNisn = Array.from(new Set([String(nisn).trim(), nisnNormTarget].filter(Boolean)));
+          for (var i = 0; i < kandidatNisn.length; i++) {
+            var snapPrev = await db.collection("rekap_nilai")
+              .where("nisn", "==", kandidatNisn[i])
+              .get();
 
-          var ketemu = null;
-          snapPrev.forEach(function(doc) {
-            var d2 = doc.data() || {};
-            var st2 = String(d2.status || "").trim();
-            if (st2.toLowerCase().indexOf("selesai") !== -1 || st2.toLowerCase().indexOf("diskualifikasi") !== -1 || st2.toLowerCase().indexOf("habis") !== -1) {
-              ketemu = st2;
+            var ketemu = null;
+            snapPrev.forEach(function(doc) {
+              var d2 = doc.data() || {};
+              var m2Norm = normalisasiMapelKunci(d2.mapel);
+              var cocokMapel = (String(d2.mapel || "").trim() === String(mapel).trim()) ||
+                (mapelNormTarget && m2Norm === mapelNormTarget);
+              var st2 = String(d2.status || "").trim();
+              if (cocokMapel && (isStatusFinalValid(st2) || d2.nilaiAkhir !== undefined)) {
+                ketemu = st2 || "Selesai";
+              }
+            });
+
+            if (ketemu) {
+              tandaiSelesaiLokal(nisn, mapel, ketemu);
+              return { sudahSelesai: true, info: ketemu };
             }
-          });
-
-          if (ketemu) {
-            tandaiSelesaiLokal(nisn, mapel, ketemu);
-            return { sudahSelesai: true, info: ketemu };
           }
         } catch (e) {}
 
@@ -1049,7 +1158,7 @@
         await pastikanTercatatHadir("submit_token");
 
         try {
-          var snap = await db.collection("master_ujian").where("token", "==", t).limit(1).get();
+          var snap = await db.collection("master_ujian").where("token", "==", t).get();
           if (snap.empty) {
             document.getElementById("btn-token").innerText = "Submit Data & Token";
             document.getElementById("btn-token").disabled = false;
@@ -1058,33 +1167,63 @@
             return;
           }
 
-          var ujian = snap.docs[0].data();
+          var semuaJadwalToken = [];
+          snap.forEach(function(doc) {
+            semuaJadwalToken.push(doc.data());
+          });
+
+          // Saring jadwal yang cocok dengan data siswa (kelas / angkatan / jenjang mapel)
+          var jadwalCocokSiswa = semuaJadwalToken.filter(function(j) {
+            return isJadwalCocokDenganSiswa_(j, dataUserAktif);
+          });
+
+          if (jadwalCocokSiswa.length === 0) {
+            document.getElementById("btn-token").innerText = "Submit Data & Token";
+            document.getElementById("btn-token").disabled = false;
+            err.innerText = "Token ini tidak sesuai untuk data siswa Anda (" + (dataUserAktif.nama || "-") + " • Kelas " + (dataUserAktif.kelas || "-") + ").";
+            err.classList.remove("hidden");
+            return;
+          }
+
           var now = new Date();
+          var ujian = null;
           var sisaDetik = 3600;
+          var pesanWaktuTerakhir = "";
 
-          if (ujian.tanggal && ujian.jamMulai && ujian.jamSelesai) {
-            var pTgl = ujian.tanggal.split("-");
-            var yyyy = parseInt(pTgl[0], 10), mm = parseInt(pTgl[1], 10) - 1, dd = parseInt(pTgl[2], 10);
-            var sM = ujian.jamMulai.split(":");
-            var startTime = new Date(yyyy, mm, dd, parseInt(sM[0], 10), parseInt(sM[1], 10), 0);
-            var sS = ujian.jamSelesai.split(":");
-            var endTime = new Date(yyyy, mm, dd, parseInt(sS[0], 10), parseInt(sS[1], 10), 0);
+          // Prioritaskan jadwal yang aktif pada jam sekarang
+          for (var idx = 0; idx < jadwalCocokSiswa.length; idx++) {
+            var cand = jadwalCocokSiswa[idx];
+            if (cand.tanggal && cand.jamMulai && cand.jamSelesai) {
+              var pTgl = cand.tanggal.split("-");
+              var yyyy = parseInt(pTgl[0], 10), mm = parseInt(pTgl[1], 10) - 1, dd = parseInt(pTgl[2], 10);
+              var sM = cand.jamMulai.split(":");
+              var startTime = new Date(yyyy, mm, dd, parseInt(sM[0], 10), parseInt(sM[1], 10), 0);
+              var sS = cand.jamSelesai.split(":");
+              var endTime = new Date(yyyy, mm, dd, parseInt(sS[0], 10), parseInt(sS[1], 10), 0);
 
-            if (now < startTime) {
-              document.getElementById("btn-token").innerText = "Submit Data & Token";
-              document.getElementById("btn-token").disabled = false;
-              err.innerText = "Ujian belum dimulai! Jadwal: " + ujian.jamMulai;
-              err.classList.remove("hidden");
-              return;
+              if (now < startTime) {
+                pesanWaktuTerakhir = "Ujian belum dimulai! Jadwal: " + cand.jamMulai;
+                continue;
+              }
+              if (now > endTime) {
+                pesanWaktuTerakhir = "Waktu Ujian sudah berakhir pada " + cand.jamSelesai;
+                continue;
+              }
+              ujian = cand;
+              sisaDetik = Math.floor((endTime.getTime() - now.getTime()) / 1000);
+              break;
+            } else {
+              ujian = cand;
+              break;
             }
-            if (now > endTime) {
-              document.getElementById("btn-token").innerText = "Submit Data & Token";
-              document.getElementById("btn-token").disabled = false;
-              err.innerText = "Waktu Ujian sudah berakhir pada " + ujian.jamSelesai;
-              err.classList.remove("hidden");
-              return;
-            }
-            sisaDetik = Math.floor((endTime.getTime() - now.getTime()) / 1000);
+          }
+
+          if (!ujian) {
+            document.getElementById("btn-token").innerText = "Submit Data & Token";
+            document.getElementById("btn-token").disabled = false;
+            err.innerText = pesanWaktuTerakhir || "Jadwal ujian belum aktif untuk sesi saat ini.";
+            err.classList.remove("hidden");
+            return;
           }
 
           if (!ujian.formId) {
@@ -1167,7 +1306,7 @@
           var d = new Date();
           document.getElementById("kt-waktu").innerText = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
 
-          var savedData = modeRemedial ? null : localStorage.getItem("CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel);
+          var savedData = modeRemedial ? null : (localStorage.getItem(getSessionStorageKey()) || localStorage.getItem("CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel));
           var isResume = false;
           jumlahPelanggaran = 0;
           countdownAktifSoalIndex = null;
@@ -1552,6 +1691,7 @@
         if (tersimpanUtama) {
           var sessKey = getSessionStorageKey();
           if (sessKey) localStorage.removeItem(sessKey);
+          localStorage.removeItem("CBT_" + dataUserAktif.nisn + "_" + dataUserAktif.mapel);
         }
 
         var ketSimpan = tersimpanUtama
