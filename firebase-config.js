@@ -1,14 +1,14 @@
 // =========================================================================
-// KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG
+// KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG (SERVER 2)
 // =========================================================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBiK7v2PLgFeSC_FSi-iN3EL7mTh3bOZHc",
-  authDomain: "cbt-man1-tabalong.firebaseapp.com",
-  projectId: "cbt-man1-tabalong",
-  storageBucket: "cbt-man1-tabalong.firebasestorage.app",
-  messagingSenderId: "150623087457",
-  appId: "1:150623087457:web:69936beda7f09bdd1b7320"
+  apiKey: "AIzaSyBr358_xp8niT5hdaG_Y9uaLg_dZSCrgqo",
+  authDomain: "cbt-man1-tabalong-2.firebaseapp.com",
+  projectId: "cbt-man1-tabalong-2",
+  storageBucket: "cbt-man1-tabalong-2.firebasestorage.app",
+  messagingSenderId: "601426183735",
+  appId: "1:601426183735:web:ea6840d95592b34125a1b2"
 };
 
 // Inisialisasi Firebase & Firestore (Compat v10)
