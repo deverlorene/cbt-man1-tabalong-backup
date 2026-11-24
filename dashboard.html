@@ -959,18 +959,33 @@
           };
         });
 
+        // Fungsi bantu untuk mencocokkan nama mapel secara longgar (mengabaikan tanda hubung, kelas, atau spasi ganda)
+        function normalisasiNamaMapel_(str) {
+          return String(str || "")
+            .toLowerCase()
+            .replace(/[-–—]/g, " ")
+            .replace(/\bkelas\b.*$/i, "")
+            .replace(/[^a-z0-9 ]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        }
+
+        var mapelSesiNormList = mapelSesiList.map(normalisasiNamaMapel_).filter(Boolean);
+
         var mapSelesai = {};
         listRekapAll.forEach(function(d) {
           var mRekap = String(d.mapel || "").trim();
+          var mRekapNorm = normalisasiNamaMapel_(mRekap);
           var jRekapKey = mRekap && mapJadwalByMapel[mRekap] ? buatKunciSesi(mapJadwalByMapel[mRekap]) : "";
-
-          // Jika sesi tertentu dipilih, cocokkan via mapel di sesi atau tanggal sesi
           var tglSubmit = String(d.tanggal || "").trim();
+
+          // Jika sesi tertentu dipilih:
+          // - Bila sesi memiliki daftar mapel (mapelSesiList.length > 0), WAJIB cocok mapel atau kunci sesinya
+          // - Jangan jadikan rekap mapel lain di tanggal yang sama sebagai "Selesai" untuk sesi mapel ini
           if (sesiTarget && sesiTarget !== "Semua") {
-            var cocokMapel = mapelSesiList.indexOf(mRekap) !== -1;
+            var cocokMapel = (mapelSesiList.indexOf(mRekap) !== -1) || (mRekapNorm && mapelSesiNormList.indexOf(mRekapNorm) !== -1);
             var cocokKey = (jRekapKey && jRekapKey === sesiTarget);
-            var cocokTanggal = (tglSubmit && tglSubmit === tglQuery);
-            if (!cocokMapel && !cocokKey && !cocokTanggal) return;
+            if (!cocokMapel && !cocokKey) return;
           }
 
           var nKey = normNisnStr(d.nisn);
@@ -1018,11 +1033,21 @@
           var h = mapHadir[nisnNorm] || null;
           var u = mapSelesai[nisnNorm] || null;
 
-          var sudahHadir = !!(h || (u && (u.isFinal || u.hasSkor)));
+          var uCocokSesi = false;
+          if (u && (u.isFinal || u.hasSkor)) {
+            if (!sesiTarget || sesiTarget === "Semua" || mapelSesiList.length === 0) {
+              uCocokSesi = true;
+            } else {
+              var uMapelNorm = normalisasiNamaMapel_(u.mapel);
+              uCocokSesi = (mapelSesiList.indexOf(u.mapel) !== -1) || (uMapelNorm && mapelSesiNormList.indexOf(uMapelNorm) !== -1);
+            }
+          }
+          var sudahHadir = !!(h || uCocokSesi);
+          var uAktif = uCocokSesi ? u : null;
 
           var mapelSiswa = "";
           if (sesiTarget && sesiTarget !== "Semua" && mapelSesiList.length > 0) {
-            if (u && u.mapel && mapelSesiList.indexOf(u.mapel) !== -1) {
+            if (uAktif && uAktif.mapel && mapelSesiList.indexOf(uAktif.mapel) !== -1) {
               mapelSiswa = u.mapel;
             } else if (h && h.mapel && mapelSesiList.indexOf(h.mapel) !== -1) {
               mapelSiswa = h.mapel;
@@ -1030,7 +1055,7 @@
               mapelSiswa = mapelSesiList.join(", ");
             }
           } else {
-            if (u && u.mapel && u.mapel !== "-") {
+            if (uAktif && uAktif.mapel && uAktif.mapel !== "-") {
               mapelSiswa = u.mapel;
             } else if (h && h.mapel && h.mapel !== "-") {
               mapelSiswa = h.mapel;
@@ -1040,8 +1065,8 @@
           }
 
           var ketStatus = "-";
-          if (u) {
-            ketStatus = u.status + (u.isSusulan && u.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(u.tanggalSubmit) + "]" : "");
+          if (uAktif) {
+            ketStatus = uAktif.status + (uAktif.isSusulan && uAktif.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(uAktif.tanggalSubmit) + "]" : "");
           } else if (h) {
             // Jika ada log absensi masuk tapi belum ada dokumen selesai, cek apakah jadwal sesi sudah lewat atau masih aktif
             var statusJadwalSiswa = h.mapel && mapJadwalByMapel[h.mapel]
@@ -1063,8 +1088,8 @@
             kelas: s.kelas,
             angkatan: angStr,
             ruang: s.ruang || "Belum Set Ruang",
-            jamLogin: sudahHadir ? (h ? h.jam : (u ? (u.isSusulan ? u.waktuView : u.jamView) : "-")) : "-",
-            statusHadir: sudahHadir ? (u && u.isSusulan && !h ? "Hadir (Susulan)" : "Hadir") : "Belum Hadir",
+            jamLogin: sudahHadir ? (h ? h.jam : (uAktif ? (uAktif.isSusulan ? uAktif.waktuView : uAktif.jamView) : "-")) : "-",
+            statusHadir: sudahHadir ? (uAktif && uAktif.isSusulan && !h ? "Hadir (Susulan)" : "Hadir") : "Belum Hadir",
             keterangan: ketStatus,
             statusSesiLive: sudahHadir && h ? h.statusSesi : "AKTIF",
             catatanLock: sudahHadir && h ? h.catatan : "-"
