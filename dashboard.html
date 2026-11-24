@@ -123,7 +123,7 @@
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
               <div>
                 <h2 class="text-xl font-bold text-slate-800">Monitoring Ruang Ujian & Absensi</h2>
-                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Klik Refresh atau aktifkan Auto-60d untuk memperbarui status kehadiran, jadwal sesi & kunci siswa.</p>
+                <p class="text-xs text-slate-500 mt-1" id="info-pantau-ruang">Pilih Hari/Tanggal & Sesi Ujian, lalu klik Refresh untuk memantau kehadiran dan status susulan.</p>
               </div>
               <div class="flex gap-2 w-full md:w-auto flex-wrap items-center">
                 <input type="text" id="search-ruang" onkeyup="cariTabel('search-ruang', 'tb-ruang-ujian')" placeholder="Cari siswa..." class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
@@ -137,7 +137,7 @@
                 </select>
 
                 <select id="filter-mapel-ruang" onchange="muatDataRuangUjian(true)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                  <option value="Semua">Semua Jam Sesi Ujian</option>
+                  <option value="Semua">Semua Hari & Sesi Ujian</option>
                 </select>
 
                 <button onclick="muatDataRuangUjian(true)" class="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-sync-alt"></i> Refresh</button>
@@ -211,15 +211,18 @@
         <div id="page-hasil-ujian" class="page-section hidden space-y-6">
           <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-              <div><h2 class="text-xl font-bold text-slate-800">Hasil Ujian & Analisis Pusat</h2><p class="text-xs text-slate-500 mt-1">Klik Muat Hasil untuk mengambil rekap nilai dari Firebase secara terukur.</p></div>
+              <div>
+                <h2 class="text-xl font-bold text-slate-800">Hasil Ujian & Analisis Pusat</h2>
+                <p class="text-xs text-slate-500 mt-1" id="info-hasil-sumber">Memuat gabungan data dari Firebase & Spreadsheet Rekap (termasuk data susulan).</p>
+              </div>
               <div class="flex gap-2 w-full md:w-auto overflow-x-auto">
                 <input type="text" id="search-hasil" onkeyup="cariTabel('search-hasil', 'tb-hasil-ujian-admin')" placeholder="Cari nama/NISN..." class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
                 <select id="filter-kelas" onchange="renderTabelHasilAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Kelas</option></select>
-                <select id="filter-mapel" onchange="renderTabelHasilAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Mapel</option></select>
+                <select id="filter-mapel" onchange="muatHasilPerMapelTerpilih()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Mapel</option></select>
                 <select id="filter-status" onchange="renderTabelHasilAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
                   <option value="Semua">Semua Status</option><option value="Curang">Terindikasi Curang</option><option value="DibawahKKM">Nilai &lt; 60</option><option value="Normal">Selesai Normal</option>
                 </select>
-                <button onclick="loadHasilUjianAdmin(true)" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap"><i class="fas fa-sync-alt"></i></button>
+                <button onclick="loadHasilUjianAdmin(true)" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap" title="Refresh Hasil Ujian"><i class="fas fa-sync-alt"></i></button>
                 <button onclick="unduhCSVHasilAdmin()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-file-excel"></i> Export CSV</button>
               </div>
             </div>
@@ -344,6 +347,9 @@
   </div>
 
   <script>
+    // URL Web App Backup Google Sheets (sebagai sumber cadangan hasil saat kuota Firestore penuh)
+    var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
+
     var currentUser = null;
     var editState = { mode: false, type: '', id1: '', id2: '' };
     var dataHasilUjianGlobal = [];
@@ -368,6 +374,10 @@
       if (typeof getTodayStr === "function") return getTodayStr();
       var now = new Date();
       return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+    }
+
+    function normNisnStr(val) {
+      return String(val || "").trim().replace(/\.0$/, "").replace(/^0+/, "");
     }
 
     function escapeAttr(str) {
@@ -670,14 +680,42 @@
       return "Belum Set Angkatan";
     }
 
+    // Format Hari & Tanggal + Jam Sesi (contoh: "Senin, 24/11/2026 • 09:30 - 11:00")
+    function formatHariTanggalIndo(tglIso) {
+      if (!tglIso) return "";
+      var p = String(tglIso).trim().split("-");
+      if (p.length !== 3) return String(tglIso);
+      var yyyy = parseInt(p[0], 10);
+      var mm = parseInt(p[1], 10) - 1;
+      var dd = parseInt(p[2], 10);
+      var dt = new Date(yyyy, mm, dd);
+      if (isNaN(dt.getTime())) return String(tglIso);
+      var hariNama = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][dt.getDay()];
+      return hariNama + ", " + String(dd).padStart(2, "0") + "/" + String(mm + 1).padStart(2, "0") + "/" + yyyy;
+    }
+
     function formatSesiJadwal(j) {
       if (!j) return "";
-      var jm = String(j.jamMulai || "").trim();
-      var js = String(j.jamSelesai || "").trim();
-      if (jm && js) return jm + " - " + js;
-      if (jm) return "Mulai " + jm;
-      if (js) return "Selesai " + js;
-      return String(j.mapel || "").trim();
+      var tglStr = String(j.tanggal || "").trim();
+      var hariTgl = formatHariTanggalIndo(tglStr);
+      var jm = String(j.jamMulai || "").trim().substring(0, 5);
+      var js = String(j.jamSelesai || "").trim().substring(0, 5);
+      var jamStr = "";
+      if (jm && js) jamStr = jm + " - " + js;
+      else if (jm) jamStr = "Mulai " + jm;
+      else if (js) jamStr = "Selesai " + js;
+      else jamStr = String(j.mapel || "").trim();
+
+      if (hariTgl) return hariTgl + " • " + jamStr;
+      return jamStr;
+    }
+
+    function buatKunciSesi(j) {
+      if (!j) return "";
+      var tgl = String(j.tanggal || "").trim();
+      var jm = String(j.jamMulai || "").trim().substring(0, 5);
+      var js = String(j.jamSelesai || "").trim().substring(0, 5);
+      return tgl + "|" + jm + "-" + js;
     }
 
     function evaluasiStatusJadwalAktif(jadwalObj, nowDate) {
@@ -732,7 +770,7 @@
         return;
       }
 
-      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat data ruang & jadwal sesi...</td></tr>';
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat data ruang, hari & jadwal sesi...</td></tr>';
 
       try {
         var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", true);
@@ -777,25 +815,38 @@
           ruangTarget = filterRuangEl.value;
         }
 
-        var unikSesi = [];
-        var mapJadwalBySesi = {};
+        // Bangun daftar Hari + Tanggal + Jam Sesi secara unik
+        var unikSesiKeys = [];
+        var mapJadwalByKey = {};
+        var mapLabelByKey = {};
         var mapJadwalByMapel = {};
+        var mapMapelListByKey = {};
+
         jadwalList.forEach(function(j) {
           var m = String(j.mapel || "").trim();
           if (m && !mapJadwalByMapel[m]) mapJadwalByMapel[m] = j;
 
+          var keySesi = buatKunciSesi(j);
           var labelSesi = formatSesiJadwal(j);
-          if (!labelSesi) return;
-          if (!mapJadwalBySesi[labelSesi]) mapJadwalBySesi[labelSesi] = j;
-          if (unikSesi.indexOf(labelSesi) === -1) unikSesi.push(labelSesi);
+          if (!keySesi || !labelSesi) return;
+
+          if (!mapJadwalByKey[keySesi]) {
+            mapJadwalByKey[keySesi] = j;
+            mapLabelByKey[keySesi] = labelSesi;
+            mapMapelListByKey[keySesi] = [];
+            unikSesiKeys.push(keySesi);
+          }
+          if (m && mapMapelListByKey[keySesi].indexOf(m) === -1) {
+            mapMapelListByKey[keySesi].push(m);
+          }
         });
-        unikSesi.sort();
+        unikSesiKeys.sort();
 
         var oldSesi = filterSesiEl ? filterSesiEl.value : "Semua";
         if (filterSesiEl) {
-          filterSesiEl.innerHTML = '<option value="Semua">Semua Jam Sesi Ujian</option>';
-          unikSesi.forEach(function(sesiLabel) {
-            filterSesiEl.innerHTML += `<option value="${escapeAttr(sesiLabel)}">${escapeAttr("Sesi " + sesiLabel)}</option>`;
+          filterSesiEl.innerHTML = '<option value="Semua">Semua Hari & Sesi (Hari Ini)</option>';
+          unikSesiKeys.forEach(function(kSesi) {
+            filterSesiEl.innerHTML += `<option value="${escapeAttr(kSesi)}">${escapeAttr(mapLabelByKey[kSesi])}</option>`;
           });
           if (Array.from(filterSesiEl.options).some(function(o) { return o.value === oldSesi; })) {
             filterSesiEl.value = oldSesi;
@@ -803,30 +854,45 @@
           sesiTarget = filterSesiEl.value;
         }
 
-        var jadwalAktif = (sesiTarget && sesiTarget !== "Semua") ? (mapJadwalBySesi[sesiTarget] || null) : null;
+        var jadwalAktif = (sesiTarget && sesiTarget !== "Semua") ? (mapJadwalByKey[sesiTarget] || null) : null;
         var tglQuery = (jadwalAktif && jadwalAktif.tanggal) ? String(jadwalAktif.tanggal).trim() : safeTodayStr();
+        var mapelSesiList = (sesiTarget && sesiTarget !== "Semua") ? (mapMapelListByKey[sesiTarget] || []) : [];
 
+        // Query absensi hari tersebut
         var absenQuery = db.collection("log_absensi").where("tanggal", "==", tglQuery);
-        var rekapQuery = db.collection("rekap_nilai").where("tanggal", "==", tglQuery);
-
         if (isPengawas) {
           absenQuery = absenQuery.where("ruang", "==", currentUser.ruang);
         } else if (ruangTarget && ruangTarget !== "Semua") {
           absenQuery = absenQuery.where("ruang", "==", ruangTarget);
         }
 
-        var [absenSnap, rekapSnap] = await Promise.all([absenQuery.get(), rekapQuery.get()]);
+        // Query rekap berdasarkan tanggal sesi DAN juga berdasarkan mapel pada sesi tersebut
+        // agar siswa SUSULAN yang mengerjakan di hari/jam berbeda tetap terbaca!
+        var rekapByDatePromise = db.collection("rekap_nilai").where("tanggal", "==", tglQuery).get();
+        var rekapSusulanPromises = [];
+        if (mapelSesiList.length > 0 && mapelSesiList.length <= 10) {
+          rekapSusulanPromises.push(
+            db.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get()
+          );
+        }
+
+        var hasilQueries = await Promise.all([absenQuery.get(), rekapByDatePromise].concat(rekapSusulanPromises));
+        var absenSnap = hasilQueries[0];
+        var rekapSnapDate = hasilQueries[1];
+        var rekapSnapSusulan = hasilQueries[2] || null;
 
         var mapHadir = {};
         absenSnap.forEach(function(doc) {
           var d = doc.data();
           var mLog = String(d.mapel || "").trim();
-          var jLog = mLog && mapJadwalByMapel[mLog] ? formatSesiJadwal(mapJadwalByMapel[mLog]) : "";
-          if (sesiTarget && sesiTarget !== "Semua" && jLog && jLog !== sesiTarget) {
+          var jLogKey = mLog && mapJadwalByMapel[mLog] ? buatKunciSesi(mapJadwalByMapel[mLog]) : "";
+          if (sesiTarget && sesiTarget !== "Semua" && jLogKey && jLogKey !== sesiTarget) {
             return;
           }
-          mapHadir[String(d.nisn).trim()] = {
+          var nKey = normNisnStr(d.nisn);
+          mapHadir[nKey] = {
             jam: d.jamLogin || "-",
+            tanggal: d.tanggal || tglQuery,
             statusSesi: d.statusSesi || "AKTIF",
             catatan: d.catatan || "-",
             mapel: mLog || "-"
@@ -834,19 +900,42 @@
         });
 
         var mapSelesai = {};
-        rekapSnap.forEach(function(doc) {
+        function prosesDocRekapRuang(doc) {
           var d = doc.data();
           var mRekap = String(d.mapel || "").trim();
-          var jRekap = mRekap && mapJadwalByMapel[mRekap] ? formatSesiJadwal(mapJadwalByMapel[mRekap]) : "";
-          if (sesiTarget && sesiTarget !== "Semua" && jRekap && jRekap !== sesiTarget) {
-            return;
+          var jRekapKey = mRekap && mapJadwalByMapel[mRekap] ? buatKunciSesi(mapJadwalByMapel[mRekap]) : "";
+
+          // Jika sesi tertentu dipilih, cocokkan baik via kunci sesi jadwal maupun kecocokan nama mapel
+          if (sesiTarget && sesiTarget !== "Semua") {
+            var cocokMapel = mapelSesiList.indexOf(mRekap) !== -1;
+            var cocokKey = (jRekapKey && jRekapKey === sesiTarget);
+            if (!cocokMapel && !cocokKey) return;
           }
-          mapSelesai[String(d.nisn).trim()] = {
-            status: d.status || "Selesai",
-            jamView: d.jamView || "-",
-            mapel: mRekap || "-"
-          };
-        });
+
+          var nKey = normNisnStr(d.nisn);
+          var tglSubmit = String(d.tanggal || "").trim();
+          var isSusulanLuarJadwal = (tglSubmit && tglSubmit !== tglQuery) ||
+            String(d.status || "").toLowerCase().includes("remedial") ||
+            String(d.status || "").toLowerCase().includes("susulan");
+
+          var prev = mapSelesai[nKey];
+          if (!prev || Number(d.nilaiAkhir || 0) >= Number(prev.nilai || 0)) {
+            mapSelesai[nKey] = {
+              status: d.status || "Selesai",
+              jamView: d.jamView || "-",
+              waktuView: d.waktuView || "-",
+              tanggalSubmit: tglSubmit,
+              nilai: d.nilaiAkhir,
+              mapel: mRekap || "-",
+              isSusulan: isSusulanLuarJadwal
+            };
+          }
+        }
+
+        rekapSnapDate.forEach(prosesDocRekapRuang);
+        if (rekapSnapSusulan) {
+          rekapSnapSusulan.forEach(prosesDocRekapRuang);
+        }
 
         var nowObj = new Date();
         var infoJadwalDipilih = evaluasiStatusJadwalAktif(jadwalAktif, nowObj);
@@ -861,9 +950,10 @@
 
         dataRuangGlobal = kandidatSiswa.map(function(s) {
           var nisnStr = String(s.nisn).trim();
+          var nisnNorm = normNisnStr(nisnStr);
           var angStr = ekstrakAngkatanSiswa(s);
-          var h = mapHadir[nisnStr] || null;
-          var u = mapSelesai[nisnStr] || null;
+          var h = mapHadir[nisnNorm] || null;
+          var u = mapSelesai[nisnNorm] || null;
 
           var jadwalBerubahKeDepan = (sesiTarget !== "Semua" && infoJadwalDipilih.kode === "BELUM_MULAI" && !h && !u);
           var sudahHadir = jadwalBerubahKeDepan ? false : !!(h || u);
@@ -879,7 +969,7 @@
 
           var ketStatus = "-";
           if (u) {
-            ketStatus = u.status;
+            ketStatus = u.status + (u.isSusulan && u.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(u.tanggalSubmit) + "]" : "");
           } else if (h) {
             ketStatus = "Sedang Ujian";
           } else if (sesiTarget && sesiTarget !== "Semua") {
@@ -895,8 +985,8 @@
             kelas: s.kelas,
             angkatan: angStr,
             ruang: s.ruang || "Belum Set Ruang",
-            jamLogin: sudahHadir ? (h ? h.jam : (u ? u.jamView : "-")) : "-",
-            statusHadir: sudahHadir ? "Hadir" : "Belum Hadir",
+            jamLogin: sudahHadir ? (h ? h.jam : (u ? (u.isSusulan ? u.waktuView : u.jamView) : "-")) : "-",
+            statusHadir: sudahHadir ? (u && u.isSusulan && !h ? "Hadir (Susulan)" : "Hadir") : "Belum Hadir",
             keterangan: ketStatus,
             statusSesiLive: sudahHadir && h ? h.statusSesi : "AKTIF",
             catatanLock: sudahHadir && h ? h.catatan : "-"
@@ -906,8 +996,8 @@
         if (infoEl) {
           var jamUpdate = new Date().toLocaleTimeString("id-ID");
           var labelSesi = (sesiTarget && sesiTarget !== "Semua")
-            ? ("Sesi " + sesiTarget + " • " + infoJadwalDipilih.label + " (Tgl: " + tglQuery + ")")
-            : ("Semua Sesi (Tgl: " + tglQuery + ")");
+            ? ((mapLabelByKey[sesiTarget] || sesiTarget) + " • " + infoJadwalDipilih.label)
+            : ("Semua Sesi (" + formatHariTanggalIndo(tglQuery) + ")");
           infoEl.innerText = "Update: " + jamUpdate + " • Angkatan: " + angkatanTarget + " • Ruang: " + (isPengawas ? currentUser.ruang : ruangTarget) + " • " + labelSesi;
         }
 
@@ -938,8 +1028,12 @@
       } else {
         filtered.forEach(function(d) {
           tPeserta++;
-          if (d.statusHadir === "Hadir") tHadir++; else tBelum++;
-          var cHadir = d.statusHadir === "Hadir" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700";
+          var isHadirItem = d.statusHadir.indexOf("Hadir") === 0;
+          if (isHadirItem) tHadir++; else tBelum++;
+
+          var cHadir = d.statusHadir === "Hadir (Susulan)"
+            ? "bg-amber-100 text-amber-800"
+            : (isHadirItem ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700");
           var rowBg = d.statusSesiLive === "TERKUNCI" ? "bg-red-50 border-l-4 border-red-500" : "hover:bg-slate-50";
           var cKet = d.keterangan.toLowerCase().includes("selesai") ? "text-blue-600 font-bold" : "text-slate-600";
           var aksiUnlock = "";
@@ -955,7 +1049,7 @@
             ? `<br><span class="text-[11px] font-semibold text-indigo-600">Mapel: ${escapeAttr(d.mapel)}</span>`
             : "";
 
-          tb.innerHTML += `<tr class="${rowBg} border-b border-slate-100 transition-colors"><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span>${mapelHtml}</td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${d.statusHadir}</span></td><td class="px-4 py-3 font-mono">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td></tr>`;
+          tb.innerHTML += `<tr class="${rowBg} border-b border-slate-100 transition-colors"><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span>${mapelHtml}</td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${escapeAttr(d.statusHadir)}</span></td><td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block whitespace-normal max-w-[260px]">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td></tr>`;
         });
       }
 
@@ -979,39 +1073,150 @@
       }
     }
 
+    // =========================================================================
+    // HASIL UJIAN & ANALISIS PUSAT (BEBAS LIMIT 400 + GABUNG BACKUP SHEET)
+    // =========================================================================
+    function gabungkanRecordHasil(listUtama, listTambahan) {
+      var mapUnik = new Map();
+      function masuk(item) {
+        if (!item) return;
+        var nisnKey = normNisnStr(item.nisn);
+        var mapelKey = String(item.mapel || "").trim().toLowerCase().replace(/\s*-\s*/g, " ").replace(/\s+/g, " ");
+        var k = (nisnKey || String(item.nama || "").trim().toUpperCase()) + "|" + mapelKey;
+        var prev = mapUnik.get(k);
+        if (!prev || Number(item.nilai || 0) > Number(prev.nilai || 0)) {
+          mapUnik.set(k, item);
+        }
+      }
+      (listUtama || []).forEach(masuk);
+      (listTambahan || []).forEach(masuk);
+      return Array.from(mapUnik.values());
+    }
+
+    async function ambilCadanganDariSheetsBackup() {
+      if (!URL_WEB_APP_BACKUP || URL_WEB_APP_BACKUP.indexOf("https://") !== 0) return [];
+      try {
+        var res = await fetch(URL_WEB_APP_BACKUP + "?action=getBackupRekap", { method: "GET" });
+        if (!res.ok) return [];
+        var json = await res.json();
+        if (json && Array.isArray(json.data)) {
+          return json.data.map(function(r) {
+            return {
+              waktu: r.waktuView || r.waktuSelesai || "-",
+              nisn: String(r.nisn || ""),
+              nama: String(r.nama || "-"),
+              kelas: String(r.kelas || "-"),
+              mapel: String(r.mapel || "-"),
+              nilai: Number(r.nilaiAkhir || 0),
+              status: String(r.status || "Selesai [Backup]")
+            };
+          });
+        }
+      } catch (e) {}
+      return [];
+    }
+
     async function loadHasilUjianAdmin(forceRefresh) {
       var tb = document.getElementById("tb-hasil-ujian-admin");
+      var infoSumber = document.getElementById("info-hasil-sumber");
       if (!forceRefresh && memCache.hasil) {
         dataHasilUjianGlobal = memCache.hasil;
         isiFilterDanRenderHasil();
         return;
       }
 
-      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik rekap nilai...</td></tr>';
-      var snap = await db.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(400).get();
-      var list = [];
-      snap.forEach(function(doc) {
-        var d = doc.data();
-        list.push({
-          waktu: d.waktuView || "-",
-          nisn: d.nisn,
-          nama: d.nama,
-          kelas: d.kelas,
-          mapel: d.mapel,
-          nilai: d.nilaiAkhir,
-          status: d.status || "Selesai"
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik seluruh rekap nilai (termasuk susulan)...</td></tr>';
+
+      try {
+        // Ambil dari Firestore tanpa batas limit(400) agar semua hari/mapel terbaca lengkap
+        var [snap, jadwalList, backupList] = await Promise.all([
+          db.collection("rekap_nilai").get(),
+          getMasterCollectionCached("master_ujian", "jadwal", false),
+          ambilCadanganDariSheetsBackup()
+        ]);
+
+        var listFirestore = [];
+        snap.forEach(function(doc) {
+          var d = doc.data();
+          listFirestore.push({
+            waktu: d.waktuView || d.tanggal || "-",
+            waktuSort: d.waktuSelesai || d.tanggal || "",
+            nisn: d.nisn,
+            nama: d.nama,
+            kelas: d.kelas,
+            mapel: d.mapel,
+            nilai: d.nilaiAkhir,
+            status: d.status || "Selesai"
+          });
         });
-      });
-      memCache.hasil = list;
-      dataHasilUjianGlobal = list;
-      isiFilterDanRenderHasil();
+
+        var gabungan = gabungkanRecordHasil(listFirestore, backupList);
+        gabungan.sort(function(a, b) {
+          return String(b.waktuSort || b.waktu || "").localeCompare(String(a.waktuSort || a.waktu || ""));
+        });
+
+        memCache.hasil = gabungan;
+        dataHasilUjianGlobal = gabungan;
+
+        if (infoSumber) {
+          infoSumber.innerText = "Total tampil: " + gabungan.length + " rekap unik (Firestore: " + listFirestore.length +
+            (backupList.length > 0 ? " + Backup Sheet: " + backupList.length : "") + ").";
+        }
+
+        isiFilterDanRenderHasil(jadwalList);
+      } catch (e) {
+        // Jika Firestore terkena kuota 429, tetap tampilkan data dari Backup Sheets jika tersedia
+        var fallbackOnly = await ambilCadanganDariSheetsBackup();
+        if (fallbackOnly.length > 0) {
+          dataHasilUjianGlobal = fallbackOnly;
+          if (infoSumber) infoSumber.innerText = "Mode Cadangan (Kuota Firestore penuh): menampilkan " + fallbackOnly.length + " data dari Backup Sheet.";
+          isiFilterDanRenderHasil([]);
+        } else {
+          tb.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Gagal memuat hasil ujian: ${escapeAttr(e.message)}</td></tr>`;
+        }
+      }
     }
 
-    function isiFilterDanRenderHasil() {
+    async function muatHasilPerMapelTerpilih() {
+      var fMapel = document.getElementById("filter-mapel").value;
+      // Jika user memilih mapel tertentu dan belum ada di cache atau ingin pastikan lengkap, query spesifik mapel tersebut
+      if (fMapel && fMapel !== "Semua") {
+        var sudahAdaMapel = dataHasilUjianGlobal.some(function(x) { return x.mapel === fMapel; });
+        if (!sudahAdaMapel) {
+          try {
+            var snapM = await db.collection("rekap_nilai").where("mapel", "==", fMapel).get();
+            var tambahan = [];
+            snapM.forEach(function(doc) {
+              var d = doc.data();
+              tambahan.push({
+                waktu: d.waktuView || d.tanggal || "-",
+                waktuSort: d.waktuSelesai || d.tanggal || "",
+                nisn: d.nisn,
+                nama: d.nama,
+                kelas: d.kelas,
+                mapel: d.mapel,
+                nilai: d.nilaiAkhir,
+                status: d.status || "Selesai"
+              });
+            });
+            dataHasilUjianGlobal = gabungkanRecordHasil(dataHasilUjianGlobal, tambahan);
+            memCache.hasil = dataHasilUjianGlobal;
+          } catch (e) {}
+        }
+      }
+      renderTabelHasilAdmin();
+    }
+
+    function isiFilterDanRenderHasil(jadwalListOpsional) {
       var unikKelas = [], unikMapel = [];
       dataHasilUjianGlobal.forEach(function(item) {
         if (item.kelas && unikKelas.indexOf(item.kelas) === -1) unikKelas.push(item.kelas);
         if (item.mapel && unikMapel.indexOf(item.mapel) === -1) unikMapel.push(item.mapel);
+      });
+      // Lengkapi pilihan mapel dari Master_Ujian agar mapel baru/susulan selalu muncul di dropdown
+      (jadwalListOpsional || readStorageCache("jadwal") || []).forEach(function(j) {
+        var m = String(j.mapel || "").trim();
+        if (m && unikMapel.indexOf(m) === -1) unikMapel.push(m);
       });
       unikKelas.sort(); unikMapel.sort();
 
@@ -1056,11 +1261,13 @@
       var tb = document.getElementById("tb-hasil-ujian-admin");
       for (var i = 0; i < tb.rows.length; i++) {
         if (tb.rows[i].cells.length === 6) {
-          var namaNisn = tb.rows[i].cells[1].innerText.split("\n");
+          var namaNisn = tb.rows[i].cells[1].innerText.split("
+");
           rows.push([tb.rows[i].cells[0].innerText, namaNisn[0], namaNisn[1] || "", tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText, tb.rows[i].cells[4].innerText, tb.rows[i].cells[5].innerText]);
         }
       }
-      var csvContent = "data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n");
+      var csvContent = "data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("
+");
       var link = document.createElement("a");
       link.setAttribute("href", encodeURI(csvContent));
       link.setAttribute("download", "Laporan_Pusat_Hasil_Ujian.csv");
@@ -1096,7 +1303,8 @@
         if (tb.rows[i].cells.length === 4) rows.push([tb.rows[i].cells[0].innerText, tb.rows[i].cells[1].innerText, tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText]);
       }
       var link = document.createElement("a");
-      link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n")));
+      link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("
+")));
       link.setAttribute("download", "Rekap_Nilai_" + currentUser.mapel + ".csv");
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
