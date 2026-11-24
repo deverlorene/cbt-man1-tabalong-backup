@@ -877,26 +877,34 @@
           absenQuery = absenQuery.where("ruang", "==", ruangTarget);
         }
 
-        // Ambil seluruh dokumen rekap_nilai (atau gunakan cache hasil bila sudah dimuat) agar skor yang sudah masuk
-        // (termasuk susulan, beda hari, atau beda penulisan mapel) selalu terbaca sebagai Hadir/Selesai
+        // Gunakan cache hasil bila ada; jika belum, ambil rekap pada tanggal sesi & mapel sesi saja agar cepat dan hemat read
         var listRekapAll = [];
         if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
           listRekapAll = dataHasilUjianGlobal;
         } else {
-          var rekapAllSnap = await db.collection("rekap_nilai").get();
-          rekapAllSnap.forEach(function(doc) {
-            var d = doc.data();
-            listRekapAll.push({
-              waktu: d.waktuView || d.tanggal || "-",
-              waktuSort: d.waktuSelesai || d.tanggal || "",
-              jamView: d.jamView || "-",
-              tanggal: d.tanggal || "",
-              nisn: d.nisn,
-              nama: d.nama,
-              kelas: d.kelas,
-              mapel: d.mapel,
-              nilai: d.nilaiAkhir,
-              status: d.status || "Selesai"
+          var promisesRekapRuang = [db.collection("rekap_nilai").where("tanggal", "==", tglQuery).get()];
+          if (mapelSesiList.length > 0 && mapelSesiList.length <= 10) {
+            promisesRekapRuang.push(db.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get());
+          }
+          var snapsRuang = await Promise.all(promisesRekapRuang);
+          var seenDocIds = {};
+          snapsRuang.forEach(function(sn) {
+            sn.forEach(function(doc) {
+              if (seenDocIds[doc.id]) return;
+              seenDocIds[doc.id] = true;
+              var d = doc.data();
+              listRekapAll.push({
+                waktu: d.waktuView || d.tanggal || "-",
+                waktuSort: d.waktuSelesai || d.tanggal || "",
+                jamView: d.jamView || "-",
+                tanggal: d.tanggal || "",
+                nisn: d.nisn,
+                nama: d.nama,
+                kelas: d.kelas,
+                mapel: d.mapel,
+                nilai: d.nilaiAkhir,
+                status: d.status || "Selesai"
+              });
             });
           });
         }
@@ -1165,14 +1173,13 @@
         return;
       }
 
-      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik seluruh rekap nilai (termasuk susulan)...</td></tr>';
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik rekap nilai secara bertahap (hemat kuota & anti-hang)...</td></tr>';
 
       try {
-        // Ambil dari Firestore tanpa batas limit(400) agar semua hari/mapel terbaca lengkap
-        var [snap, jadwalList, backupList] = await Promise.all([
-          db.collection("rekap_nilai").get(),
-          getMasterCollectionCached("master_ujian", "jadwal", false),
-          ambilCadanganDariSheetsBackup()
+        // Batasi pembacaan awal maksimal 600 dokumen terbaru agar cepat dan tidak memicu Page Unresponsive / limit 429
+        var [snap, jadwalList] = await Promise.all([
+          db.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get(),
+          getMasterCollectionCached("master_ujian", "jadwal", false)
         ]);
 
         var listFirestore = [];
@@ -1190,7 +1197,7 @@
           });
         });
 
-        var gabungan = gabungkanRecordHasil(listFirestore, backupList);
+        var gabungan = gabungkanRecordHasil(listFirestore, []);
         gabungan.sort(function(a, b) {
           return String(b.waktuSort || b.waktu || "").localeCompare(String(a.waktuSort || a.waktu || ""));
         });
@@ -1199,21 +1206,12 @@
         dataHasilUjianGlobal = gabungan;
 
         if (infoSumber) {
-          infoSumber.innerText = "Total tampil: " + gabungan.length + " rekap unik (Firestore: " + listFirestore.length +
-            (backupList.length > 0 ? " + Backup Sheet: " + backupList.length : "") + ").";
+          infoSumber.innerText = "Menampilkan " + gabungan.length + " rekap unik terbaru dari Firestore (pilih Mapel untuk memuat mapel susulan/spesifik).";
         }
 
         isiFilterDanRenderHasil(jadwalList);
       } catch (e) {
-        // Jika Firestore terkena kuota 429, tetap tampilkan data dari Backup Sheets jika tersedia
-        var fallbackOnly = await ambilCadanganDariSheetsBackup();
-        if (fallbackOnly.length > 0) {
-          dataHasilUjianGlobal = fallbackOnly;
-          if (infoSumber) infoSumber.innerText = "Mode Cadangan (Kuota Firestore penuh): menampilkan " + fallbackOnly.length + " data dari Backup Sheet.";
-          isiFilterDanRenderHasil([]);
-        } else {
-          tb.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Gagal memuat hasil ujian: ${escapeAttr(e.message)}</td></tr>`;
-        }
+        tb.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Gagal memuat hasil ujian: ${escapeAttr(e.message)}</td></tr>`;
       }
     }
 
@@ -1282,18 +1280,36 @@
         var mk = (fKelas === "Semua") || (item.kelas === fKelas);
         var mm = (fMapel === "Semua") || (item.mapel === fMapel);
         var ms = true;
-        if (fStatus === "Curang") ms = item.status.toLowerCase().includes("diskualifikasi") || item.status.toLowerCase().includes("pelanggaran");
+        if (fStatus === "Curang") ms = String(item.status || "").toLowerCase().includes("diskualifikasi") || String(item.status || "").toLowerCase().includes("pelanggaran");
         else if (fStatus === "DibawahKKM") ms = parseFloat(item.nilai) < 60;
-        else if (fStatus === "Normal") ms = item.status.toLowerCase().includes("selesai");
+        else if (fStatus === "Normal") ms = String(item.status || "").toLowerCase().includes("selesai");
         return mk && mm && ms;
       });
       tb.innerHTML = "";
-      if (filtered.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data.</td></tr>'; return; }
-      filtered.forEach(function(d) {
+      if (filtered.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data.</td></tr>';
+        return;
+      }
+      var maxRows = 250;
+      var tampilList = filtered.slice(0, maxRows);
+      var frag = document.createDocumentFragment();
+      tampilList.forEach(function(d) {
+        var tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50";
         var cNilai = d.nilai < 60 ? "text-red-500" : "text-emerald-600";
-        var bStatus = (d.status.toLowerCase().includes("diskualifikasi") || d.status.toLowerCase().includes("pelanggaran")) ? "bg-red-100 text-red-700" : (d.status.toLowerCase().includes("habis") ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700");
-        tb.innerHTML += `<tr class="hover:bg-slate-50"><td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.waktu)}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama || "-")}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn || "-")}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas || "-")}</td><td class="px-4 py-3">${escapeAttr(d.mapel || "-")}</td><td class="px-4 py-3 text-center font-black ${cNilai}">${escapeAttr(d.nilai || 0)}</td><td class="px-4 py-3 text-center"><span class="${bStatus} px-2 py-1 rounded text-xs font-bold whitespace-normal inline-block max-w-[150px] leading-tight">${escapeAttr(d.status || "-")}</span></td></tr>`;
+        var stLower = String(d.status || "").toLowerCase();
+        var bStatus = (stLower.includes("diskualifikasi") || stLower.includes("pelanggaran"))
+          ? "bg-red-100 text-red-700"
+          : (stLower.includes("habis") ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700");
+        tr.innerHTML = `<td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.waktu)}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama || "-")}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn || "-")}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas || "-")}</td><td class="px-4 py-3">${escapeAttr(d.mapel || "-")}</td><td class="px-4 py-3 text-center font-black ${cNilai}">${escapeAttr(d.nilai || 0)}</td><td class="px-4 py-3 text-center"><span class="${bStatus} px-2 py-1 rounded text-xs font-bold whitespace-normal inline-block max-w-[150px] leading-tight">${escapeAttr(d.status || "-")}</span></td>`;
+        frag.appendChild(tr);
       });
+      if (filtered.length > maxRows) {
+        var infoRow = document.createElement("tr");
+        infoRow.innerHTML = `<td colspan="6" class="text-center py-3 text-xs text-amber-700 bg-amber-50 font-semibold">Menampilkan ${maxRows} dari ${filtered.length} data. Gunakan filter Kelas, Mapel, atau pencarian untuk menyaring lebih spesifik.</td>`;
+        frag.appendChild(infoRow);
+      }
+      tb.appendChild(frag);
     }
 
     function unduhCSVHasilAdmin() {
