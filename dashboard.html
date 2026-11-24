@@ -877,20 +877,31 @@
           absenQuery = absenQuery.where("ruang", "==", ruangTarget);
         }
 
-        // Query rekap berdasarkan tanggal sesi DAN juga berdasarkan mapel pada sesi tersebut
-        // agar siswa SUSULAN yang mengerjakan di hari/jam berbeda tetap terbaca!
-        var rekapByDatePromise = db.collection("rekap_nilai").where("tanggal", "==", tglQuery).get();
-        var rekapSusulanPromises = [];
-        if (mapelSesiList.length > 0 && mapelSesiList.length <= 10) {
-          rekapSusulanPromises.push(
-            db.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get()
-          );
+        // Ambil seluruh dokumen rekap_nilai (atau gunakan cache hasil bila sudah dimuat) agar skor yang sudah masuk
+        // (termasuk susulan, beda hari, atau beda penulisan mapel) selalu terbaca sebagai Hadir/Selesai
+        var listRekapAll = [];
+        if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
+          listRekapAll = dataHasilUjianGlobal;
+        } else {
+          var rekapAllSnap = await db.collection("rekap_nilai").get();
+          rekapAllSnap.forEach(function(doc) {
+            var d = doc.data();
+            listRekapAll.push({
+              waktu: d.waktuView || d.tanggal || "-",
+              waktuSort: d.waktuSelesai || d.tanggal || "",
+              jamView: d.jamView || "-",
+              tanggal: d.tanggal || "",
+              nisn: d.nisn,
+              nama: d.nama,
+              kelas: d.kelas,
+              mapel: d.mapel,
+              nilai: d.nilaiAkhir,
+              status: d.status || "Selesai"
+            });
+          });
         }
 
-        var hasilQueries = await Promise.all([absenQuery.get(), rekapByDatePromise].concat(rekapSusulanPromises));
-        var absenSnap = hasilQueries[0];
-        var rekapSnapDate = hasilQueries[1];
-        var rekapSnapSusulan = hasilQueries[2] || null;
+        var absenSnap = await absenQuery.get();
 
         var mapHadir = {};
         absenSnap.forEach(function(doc) {
@@ -911,45 +922,45 @@
         });
 
         var mapSelesai = {};
-        function prosesDocRekapRuang(doc) {
-          var d = doc.data();
+        listRekapAll.forEach(function(d) {
           var mRekap = String(d.mapel || "").trim();
           var jRekapKey = mRekap && mapJadwalByMapel[mRekap] ? buatKunciSesi(mapJadwalByMapel[mRekap]) : "";
 
-          // Jika sesi tertentu dipilih, cocokkan baik via kunci sesi jadwal maupun kecocokan nama mapel
+          // Jika sesi tertentu dipilih, cocokkan via mapel di sesi atau tanggal sesi
+          var tglSubmit = String(d.tanggal || "").trim();
           if (sesiTarget && sesiTarget !== "Semua") {
             var cocokMapel = mapelSesiList.indexOf(mRekap) !== -1;
             var cocokKey = (jRekapKey && jRekapKey === sesiTarget);
-            if (!cocokMapel && !cocokKey) return;
+            var cocokTanggal = (tglSubmit && tglSubmit === tglQuery);
+            if (!cocokMapel && !cocokKey && !cocokTanggal) return;
           }
 
           var nKey = normNisnStr(d.nisn);
-          var tglSubmit = String(d.tanggal || "").trim();
+          if (!nKey) return;
+
+          var nilaiVal = (d.nilai !== undefined && d.nilai !== null && d.nilai !== "") ? d.nilai : d.nilaiAkhir;
+          var hasSkor = (nilaiVal !== undefined && nilaiVal !== null && nilaiVal !== "" && !isNaN(Number(nilaiVal)));
           var isSusulanLuarJadwal = (tglSubmit && tglSubmit !== tglQuery) ||
             String(d.status || "").toLowerCase().includes("remedial") ||
             String(d.status || "").toLowerCase().includes("susulan");
 
           var stLower = String(d.status || "").toLowerCase();
-          var isDocFinal = stLower.indexOf("selesai") !== -1 || stLower.indexOf("diskualifikasi") !== -1 || stLower.indexOf("habis") !== -1 || d.nilaiAkhir !== undefined;
+          var isDocFinal = hasSkor || stLower.indexOf("selesai") !== -1 || stLower.indexOf("diskualifikasi") !== -1 || stLower.indexOf("habis") !== -1;
           var prev = mapSelesai[nKey];
-          if (!prev || isDocFinal || Number(d.nilaiAkhir || 0) >= Number(prev.nilai || 0)) {
+          if (!prev || isDocFinal || Number(nilaiVal || 0) >= Number(prev.nilai || 0)) {
             mapSelesai[nKey] = {
-              status: d.status || "Selesai",
+              status: d.status || (hasSkor ? "Selesai (Skor: " + nilaiVal + ")" : "Selesai"),
               jamView: d.jamView || "-",
-              waktuView: d.waktuView || "-",
+              waktuView: d.waktuView || d.waktu || "-",
               tanggalSubmit: tglSubmit,
-              nilai: d.nilaiAkhir,
+              nilai: hasSkor ? Number(nilaiVal) : "",
+              hasSkor: hasSkor,
               mapel: mRekap || "-",
               isSusulan: isSusulanLuarJadwal,
               isFinal: isDocFinal
             };
           }
-        }
-
-        rekapSnapDate.forEach(prosesDocRekapRuang);
-        if (rekapSnapSusulan) {
-          rekapSnapSusulan.forEach(prosesDocRekapRuang);
-        }
+        });
 
         var nowObj = new Date();
         var infoJadwalDipilih = evaluasiStatusJadwalAktif(jadwalAktif, nowObj);
@@ -969,8 +980,7 @@
           var h = mapHadir[nisnNorm] || null;
           var u = mapSelesai[nisnNorm] || null;
 
-          var jadwalBerubahKeDepan = (sesiTarget !== "Semua" && infoJadwalDipilih.kode === "BELUM_MULAI" && !h && !u);
-          var sudahHadir = jadwalBerubahKeDepan ? false : !!(h || u);
+          var sudahHadir = !!(h || (u && (u.isFinal || u.hasSkor)));
 
           var mapelSiswa = "";
           if (sesiTarget && sesiTarget !== "Semua" && mapelSesiList.length > 0) {
