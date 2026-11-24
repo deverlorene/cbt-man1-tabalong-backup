@@ -152,6 +152,9 @@
                   <option value="waktu">Urut: Waktu / Jam</option>
                   <option value="nama_asc">Urut: Nama (A - Z)</option>
                   <option value="nama_desc">Urut: Nama (Z - A)</option>
+                  <option value="status_asc">Urut: Status Pengerjaan &amp; Jadwal (A - Z)</option>
+                  <option value="status_desc">Urut: Status Pengerjaan &amp; Jadwal (Z - A)</option>
+                  <option value="prioritas_belum">Urut: Belum Kirim / Terkunci Dulu</option>
                 </select>
 
                 <button onclick="muatDataRuangUjian(true)" class="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-sync-alt"></i> Refresh</button>
@@ -1167,13 +1170,35 @@
         if (isHadirItem) tHadir++; else tBelum++;
       });
 
-      // Urutkan sesuai pilihan (Waktu / Jam atau Nama A-Z / Z-A)
+      // Urutkan sesuai pilihan (Waktu / Jam, Nama A-Z/Z-A, atau Status Pengerjaan & Jadwal)
+      var bobotPrioritasStatus = {
+        "Terkunci": 1,
+        "HadirSaja": 2,
+        "BelumKirim": 3,
+        "Selesai": 4
+      };
+
       filtered.sort(function(a, b) {
         if (sortMode === "nama_asc") {
           return String(a.nama || "").localeCompare(String(b.nama || ""), "id", { sensitivity: "base" });
         }
         if (sortMode === "nama_desc") {
           return String(b.nama || "").localeCompare(String(a.nama || ""), "id", { sensitivity: "base" });
+        }
+        if (sortMode === "status_asc") {
+          return String(a.keterangan || "").localeCompare(String(b.keterangan || ""), "id", { sensitivity: "base" })
+            || String(a.nama || "").localeCompare(String(b.nama || ""), "id", { sensitivity: "base" });
+        }
+        if (sortMode === "status_desc") {
+          return String(b.keterangan || "").localeCompare(String(a.keterangan || ""), "id", { sensitivity: "base" })
+            || String(a.nama || "").localeCompare(String(b.nama || ""), "id", { sensitivity: "base" });
+        }
+        if (sortMode === "prioritas_belum") {
+          var pA = bobotPrioritasStatus[a.kategoriStatus] || 99;
+          var pB = bobotPrioritasStatus[b.kategoriStatus] || 99;
+          if (pA !== pB) return pA - pB;
+          return String(a.keterangan || "").localeCompare(String(b.keterangan || ""), "id", { sensitivity: "base" })
+            || String(a.nama || "").localeCompare(String(b.nama || ""), "id", { sensitivity: "base" });
         }
         var jamA = String(a.jamLogin || "");
         var jamB = String(b.jamLogin || "");
