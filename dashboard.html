@@ -140,6 +140,14 @@
                   <option value="Semua">Semua Hari & Sesi Ujian</option>
                 </select>
 
+                <select id="filter-status-ruang" onchange="currentPageRuang = 1; renderTabelRuangAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white font-semibold text-slate-700">
+                  <option value="Semua">Semua Status</option>
+                  <option value="BelumKirim">Belum Kirim / Belum Hadir</option>
+                  <option value="Selesai">Selesai / Ada Nilai</option>
+                  <option value="HadirSaja">Hadir / Belum Submit</option>
+                  <option value="Terkunci">Terkunci / Diskualifikasi</option>
+                </select>
+
                 <select id="sort-ruang" onchange="currentPageRuang = 1; renderTabelRuangAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white font-semibold text-slate-700">
                   <option value="waktu">Urut: Waktu / Jam</option>
                   <option value="nama_asc">Urut: Nama (A - Z)</option>
@@ -1065,20 +1073,31 @@
           }
 
           var ketStatus = "-";
+          var kategoriStatus = "BelumKirim";
           if (uAktif) {
-            ketStatus = uAktif.status + (uAktif.isSusulan && uAktif.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(uAktif.tanggalSubmit) + "]" : "");
+            var skorLabel = uAktif.hasSkor ? (" • Nilai: " + uAktif.nilai) : "";
+            ketStatus = uAktif.status + skorLabel + (uAktif.isSusulan && uAktif.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(uAktif.tanggalSubmit) + "]" : "");
+            var stLowerU = String(uAktif.status || "").toLowerCase();
+            kategoriStatus = (stLowerU.indexOf("diskualifikasi") !== -1) ? "Terkunci" : "Selesai";
           } else if (h) {
-            // Jika ada log absensi masuk tapi belum ada dokumen selesai, cek apakah jadwal sesi sudah lewat atau masih aktif
             var statusJadwalSiswa = h.mapel && mapJadwalByMapel[h.mapel]
               ? evaluasiStatusJadwalAktif(mapJadwalByMapel[h.mapel], nowObj)
               : infoJadwalDipilih;
-            ketStatus = (statusJadwalSiswa.kode === "HABIS")
-              ? ("Belum Submit / " + statusJadwalSiswa.label)
-              : "Sedang Ujian";
+            if (h.statusSesi === "TERKUNCI") {
+              ketStatus = "TERKUNCI: " + h.catatan;
+              kategoriStatus = "Terkunci";
+            } else {
+              ketStatus = (statusJadwalSiswa.kode === "HABIS")
+                ? ("Jawaban Belum Terkirim (Waktu Habis " + (normJamHhMm(mapJadwalByMapel[h.mapel] ? mapJadwalByMapel[h.mapel].jamSelesai : "") || "") + ")")
+                : "Sedang Mengerjakan (Belum Submit)";
+              kategoriStatus = "HadirSaja";
+            }
           } else if (sesiTarget && sesiTarget !== "Semua") {
-            ketStatus = infoJadwalDipilih.label;
+            ketStatus = "Belum Hadir / Jawaban Belum Terkirim • " + infoJadwalDipilih.label;
+            kategoriStatus = "BelumKirim";
           } else {
-            ketStatus = "-";
+            ketStatus = "Belum Hadir / Belum Ada Rekap";
+            kategoriStatus = "BelumKirim";
           }
 
           return {
@@ -1091,6 +1110,7 @@
             jamLogin: sudahHadir ? (h ? h.jam : (uAktif ? (uAktif.isSusulan ? uAktif.waktuView : uAktif.jamView) : "-")) : "-",
             statusHadir: sudahHadir ? (uAktif && uAktif.isSusulan && !h ? "Hadir (Susulan)" : "Hadir") : "Belum Hadir",
             keterangan: ketStatus,
+            kategoriStatus: kategoriStatus,
             statusSesiLive: sudahHadir && h ? h.statusSesi : "AKTIF",
             catatanLock: sudahHadir && h ? h.catatan : "-"
           };
@@ -1124,10 +1144,21 @@
         fRuang = currentUser.ruang;
       }
 
+      var fStatusRuang = document.getElementById("filter-status-ruang") ? document.getElementById("filter-status-ruang").value : "Semua";
       var filtered = dataRuangGlobal.filter(function(item) {
         var okRuang = (fRuang === "Semua") || (item.ruang === fRuang);
         var okAng = (fAngkatan === "Semua") || (item.angkatan === fAngkatan);
-        return okRuang && okAng;
+        var okStatus = true;
+        if (fStatusRuang === "BelumKirim") {
+          okStatus = (item.kategoriStatus === "BelumKirim" || item.kategoriStatus === "HadirSaja");
+        } else if (fStatusRuang === "Selesai") {
+          okStatus = (item.kategoriStatus === "Selesai");
+        } else if (fStatusRuang === "HadirSaja") {
+          okStatus = (item.kategoriStatus === "HadirSaja");
+        } else if (fStatusRuang === "Terkunci") {
+          okStatus = (item.kategoriStatus === "Terkunci" || item.statusSesiLive === "TERKUNCI");
+        }
+        return okRuang && okAng && okStatus;
       });
 
       var tPeserta = filtered.length, tHadir = 0, tBelum = 0;
