@@ -718,31 +718,42 @@
       return tgl + "|" + jm + "-" + js;
     }
 
+    function normJamHhMm(jStr) {
+      var raw = String(jStr || "").trim();
+      if (!raw) return "";
+      var parts = raw.split(":");
+      var hh = String(parseInt(parts[0] || "0", 10)).padStart(2, "0");
+      var mm = String(parseInt(parts[1] || "0", 10)).padStart(2, "0");
+      return hh + ":" + mm;
+    }
+
     function evaluasiStatusJadwalAktif(jadwalObj, nowDate) {
       if (!jadwalObj) {
         return { label: "Tanpa Jadwal", kode: "NORMAL" };
       }
+      var jmNorm = normJamHhMm(jadwalObj.jamMulai);
+      var jsNorm = normJamHhMm(jadwalObj.jamSelesai);
       if (String(jadwalObj.status || "").toLowerCase() === "selesai") {
         return { label: "Jadwal Ditutup/Selesai", kode: "DITUTUP" };
       }
-      if (jadwalObj.tanggal && jadwalObj.jamMulai && jadwalObj.jamSelesai) {
-        var pTgl = String(jadwalObj.tanggal).split("-");
+      if (jadwalObj.tanggal && jmNorm && jsNorm) {
+        var pTgl = String(jadwalObj.tanggal).trim().split("-");
         if (pTgl.length === 3) {
           var yyyy = parseInt(pTgl[0], 10);
           var mm = parseInt(pTgl[1], 10) - 1;
           var dd = parseInt(pTgl[2], 10);
-          var sM = String(jadwalObj.jamMulai).split(":");
-          var sS = String(jadwalObj.jamSelesai).split(":");
+          var sM = jmNorm.split(":");
+          var sS = jsNorm.split(":");
           var startTime = new Date(yyyy, mm, dd, parseInt(sM[0] || 0, 10), parseInt(sM[1] || 0, 10), 0);
           var endTime = new Date(yyyy, mm, dd, parseInt(sS[0] || 23, 10), parseInt(sS[1] || 59, 10), 59);
 
           if (nowDate < startTime) {
-            return { label: "Belum Dimulai (" + jadwalObj.jamMulai + ")", kode: "BELUM_MULAI" };
+            return { label: "Belum Dimulai (" + jmNorm + ")", kode: "BELUM_MULAI" };
           }
           if (nowDate > endTime) {
-            return { label: "Waktu Habis (" + jadwalObj.jamSelesai + ")", kode: "HABIS" };
+            return { label: "Waktu Habis (" + jsNorm + ")", kode: "HABIS" };
           }
-          return { label: "Berlangsung (" + jadwalObj.jamMulai + "-" + jadwalObj.jamSelesai + ")", kode: "AKTIF" };
+          return { label: "Berlangsung (" + jmNorm + "-" + jsNorm + ")", kode: "AKTIF" };
         }
       }
       return { label: "Aktif", kode: "AKTIF" };
@@ -918,8 +929,10 @@
             String(d.status || "").toLowerCase().includes("remedial") ||
             String(d.status || "").toLowerCase().includes("susulan");
 
+          var stLower = String(d.status || "").toLowerCase();
+          var isDocFinal = stLower.indexOf("selesai") !== -1 || stLower.indexOf("diskualifikasi") !== -1 || stLower.indexOf("habis") !== -1 || d.nilaiAkhir !== undefined;
           var prev = mapSelesai[nKey];
-          if (!prev || Number(d.nilaiAkhir || 0) >= Number(prev.nilai || 0)) {
+          if (!prev || isDocFinal || Number(d.nilaiAkhir || 0) >= Number(prev.nilai || 0)) {
             mapSelesai[nKey] = {
               status: d.status || "Selesai",
               jamView: d.jamView || "-",
@@ -927,7 +940,8 @@
               tanggalSubmit: tglSubmit,
               nilai: d.nilaiAkhir,
               mapel: mRekap || "-",
-              isSusulan: isSusulanLuarJadwal
+              isSusulan: isSusulanLuarJadwal,
+              isFinal: isDocFinal
             };
           }
         }
@@ -959,19 +973,35 @@
           var sudahHadir = jadwalBerubahKeDepan ? false : !!(h || u);
 
           var mapelSiswa = "";
-          if (u && u.mapel && u.mapel !== "-") {
-            mapelSiswa = u.mapel;
-          } else if (h && h.mapel && h.mapel !== "-") {
-            mapelSiswa = h.mapel;
-          } else if (jadwalAktif && jadwalAktif.mapel) {
-            mapelSiswa = jadwalAktif.mapel;
+          if (sesiTarget && sesiTarget !== "Semua" && mapelSesiList.length > 0) {
+            if (u && u.mapel && mapelSesiList.indexOf(u.mapel) !== -1) {
+              mapelSiswa = u.mapel;
+            } else if (h && h.mapel && mapelSesiList.indexOf(h.mapel) !== -1) {
+              mapelSiswa = h.mapel;
+            } else {
+              mapelSiswa = mapelSesiList.join(", ");
+            }
+          } else {
+            if (u && u.mapel && u.mapel !== "-") {
+              mapelSiswa = u.mapel;
+            } else if (h && h.mapel && h.mapel !== "-") {
+              mapelSiswa = h.mapel;
+            } else if (jadwalAktif && jadwalAktif.mapel) {
+              mapelSiswa = jadwalAktif.mapel;
+            }
           }
 
           var ketStatus = "-";
           if (u) {
             ketStatus = u.status + (u.isSusulan && u.tanggalSubmit ? " [Susulan: " + formatHariTanggalIndo(u.tanggalSubmit) + "]" : "");
           } else if (h) {
-            ketStatus = "Sedang Ujian";
+            // Jika ada log absensi masuk tapi belum ada dokumen selesai, cek apakah jadwal sesi sudah lewat atau masih aktif
+            var statusJadwalSiswa = h.mapel && mapJadwalByMapel[h.mapel]
+              ? evaluasiStatusJadwalAktif(mapJadwalByMapel[h.mapel], nowObj)
+              : infoJadwalDipilih;
+            ketStatus = (statusJadwalSiswa.kode === "HABIS")
+              ? ("Belum Submit / " + statusJadwalSiswa.label)
+              : "Sedang Ujian";
           } else if (sesiTarget && sesiTarget !== "Semua") {
             ketStatus = infoJadwalDipilih.label;
           } else {
