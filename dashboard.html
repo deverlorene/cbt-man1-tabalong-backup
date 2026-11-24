@@ -477,12 +477,28 @@
     });
 
     function cariTabel(inputId, tableId) {
-      var input = document.getElementById(inputId).value.toLowerCase();
+      var inputEl = document.getElementById(inputId);
+      var q = (inputEl ? inputEl.value : "").trim().toLowerCase();
+      var qNorm = q.replace(/^0+/, "");
+
+      // Jika di tabel Hasil Ujian Admin atau Ruang Ujian, render ulang dari seluruh data terfilter (bukan hanya 50 baris di halaman aktif)
+      if (tableId === "tb-hasil-ujian-admin") {
+        currentPageHasil = 1;
+        renderTabelHasilAdmin();
+        return;
+      }
+      if (tableId === "tb-ruang-ujian") {
+        currentPageRuang = 1;
+        renderTabelRuangAdmin();
+        return;
+      }
+
       var rows = document.getElementById(tableId).getElementsByTagName("tr");
       for (var i = 0; i < rows.length; i++) {
         var text = rows[i].innerText.toLowerCase();
         if (text.includes("memuat data")) continue;
-        rows[i].style.display = text.includes(input) ? "" : "none";
+        var match = text.includes(q) || (qNorm && text.includes(qNorm));
+        rows[i].style.display = match ? "" : "none";
       }
     }
 
@@ -1148,6 +1164,10 @@
       }
 
       var fStatusRuang = document.getElementById("filter-status-ruang") ? document.getElementById("filter-status-ruang").value : "Semua";
+      var qRuangEl = document.getElementById("search-ruang");
+      var qRuang = (qRuangEl ? qRuangEl.value : "").trim().toLowerCase();
+      var qRuangNorm = qRuang.replace(/^0+/, "");
+
       var filtered = dataRuangGlobal.filter(function(item) {
         var okRuang = (fRuang === "Semua") || (item.ruang === fRuang);
         var okAng = (fAngkatan === "Semua") || (item.angkatan === fAngkatan);
@@ -1161,7 +1181,14 @@
         } else if (fStatusRuang === "Terkunci") {
           okStatus = (item.kategoriStatus === "Terkunci" || item.statusSesiLive === "TERKUNCI");
         }
-        return okRuang && okAng && okStatus;
+
+        var okSearch = true;
+        if (qRuang) {
+          var hayR = (String(item.nama || "") + " " + String(item.nisn || "") + " " + String(item.kelas || "") + " " + String(item.mapel || "")).toLowerCase();
+          var hayRNorm = hayR.replace(/0+(\d)/g, "$1");
+          okSearch = hayR.includes(qRuang) || hayRNorm.includes(qRuang) || (qRuangNorm && (hayR.includes(qRuangNorm) || hayRNorm.includes(qRuangNorm)));
+        }
+        return okRuang && okAng && okStatus && okSearch;
       });
 
       var tPeserta = filtered.length, tHadir = 0, tBelum = 0;
@@ -1438,6 +1465,10 @@
       var fKelas = document.getElementById("filter-kelas").value, fMapel = document.getElementById("filter-mapel").value, fStatus = document.getElementById("filter-status").value;
       var sortMode = document.getElementById("sort-hasil") ? document.getElementById("sort-hasil").value : "waktu";
 
+      var qHasilEl = document.getElementById("search-hasil");
+      var qHasil = (qHasilEl ? qHasilEl.value : "").trim().toLowerCase();
+      var qHasilNorm = qHasil.replace(/^0+/, "");
+
       var filtered = dataHasilUjianGlobal.filter(function(item) {
         var mk = (fKelas === "Semua") || (item.kelas === fKelas);
         var mm = (fMapel === "Semua") || (item.mapel === fMapel);
@@ -1445,7 +1476,14 @@
         if (fStatus === "Curang") ms = String(item.status || "").toLowerCase().includes("diskualifikasi") || String(item.status || "").toLowerCase().includes("pelanggaran");
         else if (fStatus === "DibawahKKM") ms = parseFloat(item.nilai) < 60;
         else if (fStatus === "Normal") ms = String(item.status || "").toLowerCase().includes("selesai");
-        return mk && mm && ms;
+
+        var mSearch = true;
+        if (qHasil) {
+          var hay = (String(item.nama || "") + " " + String(item.nisn || "") + " " + String(item.kelas || "") + " " + String(item.mapel || "")).toLowerCase();
+          var hayNorm = hay.replace(/0+(\d)/g, "$1");
+          mSearch = hay.includes(qHasil) || hayNorm.includes(qHasil) || (qHasilNorm && (hay.includes(qHasilNorm) || hayNorm.includes(qHasilNorm)));
+        }
+        return mk && mm && ms && mSearch;
       });
 
       filtered.sort(function(a, b) {
