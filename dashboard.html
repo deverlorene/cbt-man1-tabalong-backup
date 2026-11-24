@@ -1261,13 +1261,11 @@
       var tb = document.getElementById("tb-hasil-ujian-admin");
       for (var i = 0; i < tb.rows.length; i++) {
         if (tb.rows[i].cells.length === 6) {
-          var namaNisn = tb.rows[i].cells[1].innerText.split("
-");
+          var namaNisn = tb.rows[i].cells[1].innerText.split("\n");
           rows.push([tb.rows[i].cells[0].innerText, namaNisn[0], namaNisn[1] || "", tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText, tb.rows[i].cells[4].innerText, tb.rows[i].cells[5].innerText]);
         }
       }
-      var csvContent = "data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("
-");
+      var csvContent = "data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n");
       var link = document.createElement("a");
       link.setAttribute("href", encodeURI(csvContent));
       link.setAttribute("download", "Laporan_Pusat_Hasil_Ujian.csv");
@@ -1303,8 +1301,7 @@
         if (tb.rows[i].cells.length === 4) rows.push([tb.rows[i].cells[0].innerText, tb.rows[i].cells[1].innerText, tb.rows[i].cells[2].innerText, tb.rows[i].cells[3].innerText]);
       }
       var link = document.createElement("a");
-      link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("
-")));
+      link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + rows.map(function(e) { return e.join(","); }).join("\n")));
       link.setAttribute("download", "Rekap_Nilai_" + currentUser.mapel + ".csv");
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
