@@ -1,9 +1,9 @@
 // =========================================================================
 // KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG (SERVER 2)
-// Upgraded v4: Instant Local Image Processing (Zero Storage Hang) & Anti-Cache
+// Upgraded v5: Anti-Cache ExamBro v5, Sinkronisasi Waktu & Fast Local Image
 // =========================================================================
 
-const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v4";
+const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v5";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
 
 (function autoCleanStaleServerCache() {
@@ -95,7 +95,7 @@ function parseJadwalDateTime(tanggalStr, jamStr, isEnd) {
 }
 
 /**
- * Memproses & mengompres gambar secara lokal (< 0.1 detik, tanpa network hang ke Firebase Storage).
+ * Memproses & mengompres gambar secara lokal (< 0.1 detik, tanpa network hang).
  * Gambar kecil <= 90 KB langsung dipakai instan; gambar besar otomatis dikompres ke max 800px WebP/JPEG.
  */
 function compressImageFile(file, maxWidth, maxHeight, quality) {
@@ -115,7 +115,6 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
     };
     reader.onload = function (ev) {
       const rawDataUrl = ev.target.result;
-      // Jika file sudah sangat ringan (<= 90 KB), langsung kembalikan tanpa perlu decode Image
       if (file.size <= 90 * 1024) {
         resolve({
           dataUrl: rawDataUrl,
@@ -126,7 +125,6 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
 
       const img = new Image();
       img.onerror = function () {
-        // Fallback jika WebView gagal decode dimensi
         resolve({
           dataUrl: rawDataUrl,
           mimeType: file.type
