@@ -9,11 +9,12 @@
   <title>Portal Staf - CBT</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <!-- Firebase SDK v10 Compat (App, Firestore & Storage untuk Upload Foto Soal) -->
+  <!-- Firebase SDK v10 Compat -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-  <script src="firebase-config.js?v=20261126v2"></script>
+  <!-- Mammoth.js untuk membaca & mengekstrak teks serta gambar dari file Word (.docx) langsung di browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
+  <script src="firebase-config.js?v=20261126v4"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -289,10 +290,10 @@
         <!-- [I] GURU: PENILAIAN & EDIT SOAL -->
         <div id="page-guru" class="page-section hidden space-y-6">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm gap-4">
-            <div><h3 class="font-bold text-slate-800">Dasbor Guru & Analisis Hasil</h3><p class="text-xs text-slate-500">Kelola soal ujian Anda (termasuk upload foto soal & opsi) dan unduh laporan nilai siswa.</p></div>
+            <div><h3 class="font-bold text-slate-800">Dasbor Guru & Analisis Hasil</h3><p class="text-xs text-slate-500">Kelola soal ujian Anda (manual, foto, maupun upload file Word .docx) dan unduh laporan nilai.</p></div>
             <div class="flex gap-2 flex-wrap">
               <button onclick="loadGuruStats(true)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold"><i class="fas fa-sync-alt"></i></button>
-              <button onclick="bukaEditSoalGuru(event)" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-edit"></i> Edit Soal & Foto</button>
+              <button onclick="bukaEditSoalGuru(event)" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-edit"></i> Edit Soal / Upload Word</button>
               <button onclick="unduhCSVNilaiGuru()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-file-excel"></i> Unduh CSV</button>
             </div>
           </div>
@@ -388,12 +389,12 @@
     </div>
   </div>
 
-  <!-- MODAL FITUR EDIT SOAL + UPLOAD FOTO (GURU & ADMIN) -->
+  <!-- MODAL FITUR EDIT SOAL + UPLOAD FOTO + IMPORT WORD (.DOCX) -->
   <div id="modal-edit-soal" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
       <div class="px-6 py-4 border-b flex items-center justify-between bg-slate-800 text-white shrink-0">
         <div>
-          <h3 class="font-bold text-base" id="title-edit-soal">Editor Soal & Foto Ujian</h3>
+          <h3 class="font-bold text-base" id="title-edit-soal">Editor Soal, Foto & Word Ujian</h3>
           <p class="text-xs text-slate-300" id="subtitle-edit-soal">Form ID: -</p>
         </div>
         <div class="flex items-center gap-2">
@@ -405,6 +406,27 @@
       </div>
 
       <div class="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-50">
+        <!-- BARIS IMPORT WORD (.DOCX) & DOWNLOAD TEMPLATE -->
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-extrabold text-indigo-900 uppercase tracking-wide">
+              <i class="fas fa-file-word text-indigo-600 mr-1"></i> Import Massal dari Microsoft Word (.docx)
+            </div>
+            <p class="text-[11px] text-indigo-700 mt-0.5">
+              Unduh template resmi, isi soal & kunci jawaban (mendukung gambar di dalam Word), lalu upload kembali di sini.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0 flex-wrap">
+            <button type="button" onclick="downloadTemplateWordDocx()" class="bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-300 px-3 py-1.5 rounded text-xs font-bold shadow-sm">
+              <i class="fas fa-download mr-1"></i> Download Template Word
+            </button>
+            <label class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer shadow-sm inline-flex items-center gap-1.5">
+              <i class="fas fa-file-upload"></i> Upload File Word (.docx)
+              <input type="file" id="file-import-word" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="handleImportWordDocx(event)" class="hidden">
+            </label>
+          </div>
+        </div>
+
         <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-slate-200">
           <div class="flex items-center gap-2 flex-wrap">
             <label class="text-xs font-bold text-slate-600 uppercase">Pilih Butir Soal:</label>
@@ -429,7 +451,7 @@
           <div class="p-3.5 bg-slate-50 border border-dashed border-slate-300 rounded-lg space-y-2.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <label class="font-bold text-slate-700 text-xs uppercase tracking-wide">
-                <i class="fas fa-image text-blue-600 mr-1"></i> Foto / Gambar Pertanyaan
+                <i class="fas fa-image text-blue-600 mr-1"></i> Foto / Gambar Pertanyaan (Instan &lt; 0.1 Detik)
               </label>
               <label class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer inline-flex items-center gap-1.5">
                 <i class="fas fa-upload"></i> Upload Foto Soal
@@ -530,7 +552,7 @@
     var currentPageHasil = 1;
     var currentPageRuang = 1;
 
-    // State Fitur Edit Soal + Foto
+    // State Fitur Edit Soal + Foto + Word
     var editorSoalState = {
       formId: "",
       mapel: "",
@@ -1686,7 +1708,9 @@
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
-    // FITUR EDIT SOAL + UPLOAD FOTO: Buka editor soal untuk Guru atau Admin
+    // =========================================================================
+    // FITUR EDIT SOAL + UPLOAD FOTO INSTAN + IMPORT WORD (.DOCX) + TEMPLATE
+    // =========================================================================
     async function bukaEditSoalGuru(event) {
       var btn = event && event.currentTarget ? event.currentTarget : null;
       var orig = btn ? btn.innerHTML : "";
@@ -1733,7 +1757,7 @@
         return;
       }
 
-      document.getElementById("title-edit-soal").innerText = "Editor Soal & Foto — " + (mapel || "Paket Ujian");
+      document.getElementById("title-edit-soal").innerText = "Editor Soal, Foto & Word — " + (mapel || "Paket Ujian");
       document.getElementById("subtitle-edit-soal").innerText = "Form ID: " + cleanFormId;
 
       var linkEl = document.getElementById("link-gform-asli");
@@ -1903,20 +1927,20 @@
       if (!Array.isArray(q.gambarList)) q.gambarList = q.gambar ? [q.gambar] : [];
 
       var stEl = document.getElementById("status-simpan-soal");
-      stEl.innerText = "Mengompres & mengunggah " + files.length + " foto pertanyaan...";
+      stEl.innerText = "Memproses " + files.length + " foto pertanyaan...";
 
       try {
         for (var i = 0; i < files.length; i++) {
-          var uploadedUrl = await uploadSoalImage(files[i], "bank_soal/" + editorSoalState.formId);
-          q.gambarList.push(uploadedUrl);
+          var dataUrl = await uploadSoalImage(files[i]);
+          q.gambarList.push(dataUrl);
         }
         q.gambar = q.gambarList[0] || "";
         renderPreviewFotoPertanyaan(q);
         renderDropdownSoalEdit();
-        stEl.innerText = "Foto pertanyaan berhasil diunggah. Klik 'Simpan Semua Perubahan Soal' untuk menyimpan permanen.";
+        stEl.innerText = "Foto pertanyaan berhasil ditambahkan! Klik 'Simpan Semua Perubahan Soal' untuk menyimpan permanen.";
       } catch (err) {
-        stEl.innerText = "Gagal mengunggah foto: " + err.message;
-        alert("Gagal mengunggah foto: " + err.message);
+        stEl.innerText = "Gagal memproses foto: " + err.message;
+        alert("Gagal memproses foto: " + err.message);
       } finally {
         event.target.value = "";
       }
@@ -1939,16 +1963,16 @@
       if (!q) return;
 
       var stEl = document.getElementById("status-simpan-soal");
-      stEl.innerText = "Mengompres & mengunggah foto untuk Opsi " + huruf + "...";
+      stEl.innerText = "Memproses foto untuk Opsi " + huruf + "...";
 
       try {
-        var uploadedUrl = await uploadSoalImage(file, "bank_soal/" + editorSoalState.formId);
-        q["opsi" + huruf + "Img"] = uploadedUrl;
-        renderPreviewFotoOpsi(huruf, uploadedUrl);
-        stEl.innerText = "Foto Opsi " + huruf + " berhasil diunggah. Jangan lupa klik Simpan.";
+        var dataUrl = await uploadSoalImage(file);
+        q["opsi" + huruf + "Img"] = dataUrl;
+        renderPreviewFotoOpsi(huruf, dataUrl);
+        stEl.innerText = "Foto Opsi " + huruf + " siap! Jangan lupa klik 'Simpan Semua Perubahan Soal'.";
       } catch (err) {
-        stEl.innerText = "Gagal mengunggah foto Opsi " + huruf + ": " + err.message;
-        alert("Gagal mengunggah foto opsi: " + err.message);
+        stEl.innerText = "Gagal memproses foto Opsi " + huruf + ": " + err.message;
+        alert("Gagal memproses foto opsi: " + err.message);
       } finally {
         event.target.value = "";
       }
@@ -2005,6 +2029,226 @@
       muatFormButirSoalEdit(editorSoalState.currentIndex);
     }
 
+    // Download Template Word (.doc yang dapat dibuka & disimpan sebagai .docx di Microsoft Word)
+    function downloadTemplateWordDocx() {
+      var mapelTitle = editorSoalState.mapel || "Mata Pelajaran";
+      var templateHtml =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"><title>Template Soal CBT - ' + escapeAttr(mapelTitle) + '</title>' +
+        '<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.4;} p{margin:4pt 0;} .panduan{background:#f1f5f9;padding:10pt;border:1pt solid #94a3b8;margin-bottom:14pt;}</style>' +
+        '</head><body>' +
+        '<div class="panduan">' +
+        '<b>TEMPLATE SOAL CBT ASAS MAN 1 TABALONG (' + escapeAttr(mapelTitle) + ')</b><br/>' +
+        '1. Awali setiap nomor soal dengan angka dan titik (contoh: <code>1.</code>, <code>2.</code>, dst.).<br/>' +
+        '2. Jika soal memiliki gambar, tempelkan/insert gambar langsung di bawah teks pertanyaan sebelum Opsi A.<br/>' +
+        '3. Tulis opsi jawaban dengan awalan <code>A.</code>, <code>B.</code>, <code>C.</code>, <code>D.</code>, <code>E.</code>.<br/>' +
+        '4. Tulis kunci jawaban di bawah setiap soal dengan format: <code>KUNCI: A</code> (atau B/C/D/E).<br/>' +
+        '5. Simpan dokumen ini sebagai <b>Word Document (.docx)</b> melalui menu <i>File &gt; Save As &gt; Word Document (*.docx)</i> sebelum diunggah kembali.' +
+        '</div>' +
+        '<p>1. Ibu kota Provinsi Kalimantan Selatan saat ini adalah ....</p>' +
+        '<p>A. Banjarmasin</p>' +
+        '<p>B. Banjarbaru</p>' +
+        '<p>C. Martapura</p>' +
+        '<p>D. Tanjung</p>' +
+        '<p>E. Kandangan</p>' +
+        '<p>KUNCI: B</p>' +
+        '<p><br/></p>' +
+        '<p>2. Perhatikan pernyataan berikut untuk menjawab soal nomor 2.</p>' +
+        '<p>Salah satu fungsi utama perangkat lunak pengolah kata adalah ....</p>' +
+        '<p>A. Mengolah data angka dalam bentuk tabel keuangan</p>' +
+        '<p>B. Membuat presentasi multimedia interaktif</p>' +
+        '<p>C. Menyusun dan menyunting dokumen teks serta naskah</p>' +
+        '<p>D. Mengedit video beresolusi tinggi</p>' +
+        '<p>E. Mengelola basis data relasional berskala besar</p>' +
+        '<p>KUNCI: C</p>' +
+        '</body></html>';
+
+      var blob = new Blob(["\ufeff", templateHtml], { type: "application/msword" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "Template_Soal_CBT_" + safeSanitizeId(mapelTitle) + ".doc";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Kompres dataUrl gambar hasil ekstraksi Word agar tetap ringan untuk Firestore
+    function compressExtractedDataUrl(dataUrl) {
+      return new Promise(function(resolve) {
+        if (!dataUrl || dataUrl.length < 120000) {
+          resolve(dataUrl);
+          return;
+        }
+        var img = new Image();
+        img.onload = function() {
+          var maxW = 800, maxH = 800;
+          var w = img.width, h = img.height;
+          if (w > maxW || h > maxH) {
+            var r = Math.min(maxW / w, maxH / h);
+            w = Math.round(w * r);
+            h = Math.round(h * r);
+          }
+          var canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.72));
+        };
+        img.onerror = function() {
+          resolve(dataUrl);
+        };
+        img.src = dataUrl;
+      });
+    }
+
+    // Parser File Word (.docx) menggunakan Mammoth.js (mengekstrak teks soal, gambar, opsi A-E, dan KUNCI)
+    async function handleImportWordDocx(event) {
+      var file = event.target && event.target.files ? event.target.files[0] : null;
+      if (!file) return;
+
+      if (typeof mammoth === "undefined") {
+        alert("Library pembaca Word (.docx) belum termuat. Periksa koneksi internet lalu muat ulang halaman.");
+        event.target.value = "";
+        return;
+      }
+
+      var stEl = document.getElementById("status-simpan-soal");
+      stEl.innerText = "Membaca dan mengekstrak soal dari file Word (.docx)...";
+
+      try {
+        var arrayBuffer = await file.arrayBuffer();
+        var result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+        var htmlStr = result.value || "";
+
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(htmlStr, "text/html");
+        var blocks = Array.from(doc.body.children);
+
+        var parsedQuestions = [];
+        var currentQ = null;
+        var currentOptionKey = "";
+
+        async function finalizeCurrentQuestion() {
+          if (!currentQ) return;
+          if (currentQ.pertanyaan.trim() !== "" || currentQ.gambarList.length > 0) {
+            for (var g = 0; g < currentQ.gambarList.length; g++) {
+              currentQ.gambarList[g] = await compressExtractedDataUrl(currentQ.gambarList[g]);
+            }
+            currentQ.gambar = currentQ.gambarList[0] || "";
+            parsedQuestions.push(currentQ);
+          }
+          currentQ = null;
+          currentOptionKey = "";
+        }
+
+        for (var b = 0; b < blocks.length; b++) {
+          var el = blocks[b];
+          var imgsInBlock = Array.from(el.querySelectorAll("img")).map(function(img) {
+            return img.getAttribute("src") || "";
+          }).filter(Boolean);
+
+          var rawText = (el.textContent || "").replace(/\u00a0/g, " ").trim();
+
+          // Cek apakah blok dimulai dengan nomor soal: "1. ..." atau "1) ..."
+          var qMatch = rawText.match(/^(\d+)\s*[\.\)]\s*(.*)$/);
+          if (qMatch) {
+            await finalizeCurrentQuestion();
+            currentQ = {
+              no: parsedQuestions.length + 1,
+              pertanyaan: qMatch[2] || "",
+              deskripsi: "",
+              gambarList: imgsInBlock.slice(),
+              opsiA: "",
+              opsiB: "",
+              opsiC: "",
+              opsiD: "",
+              opsiE: "",
+              opsiAImg: "",
+              opsiBImg: "",
+              opsiCImg: "",
+              opsiDImg: "",
+              opsiEImg: "",
+              kunci: ""
+            };
+            currentOptionKey = "";
+            continue;
+          }
+
+          if (!currentQ) continue;
+
+          // Cek apakah baris Kunci Jawaban: "KUNCI: A" atau "Jawaban: B"
+          var kunciMatch = rawText.match(/^(?:KUNCI|JAWABAN|KUNCI\s+JAWABAN)\s*[:=\-]?\s*([A-E])\b/i);
+          if (kunciMatch) {
+            currentQ.kunci = kunciMatch[1].toUpperCase();
+            currentOptionKey = "";
+            continue;
+          }
+
+          // Cek apakah baris Opsi A - E: "A. ..." atau "A) ..."
+          var optMatch = rawText.match(/^([A-E])\s*[\.\)]\s*(.*)$/i);
+          if (optMatch) {
+            var letter = optMatch[1].toUpperCase();
+            currentOptionKey = letter;
+            currentQ["opsi" + letter] = optMatch[2] || "";
+            if (imgsInBlock.length > 0) {
+              currentQ["opsi" + letter + "Img"] = await compressExtractedDataUrl(imgsInBlock[0]);
+            }
+            continue;
+          }
+
+          // Lanjutan teks / gambar untuk opsi aktif atau pertanyaan aktif
+          if (currentOptionKey) {
+            if (rawText) {
+              currentQ["opsi" + currentOptionKey] += (currentQ["opsi" + currentOptionKey] ? " " : "") + rawText;
+            }
+            if (imgsInBlock.length > 0 && !currentQ["opsi" + currentOptionKey + "Img"]) {
+              currentQ["opsi" + currentOptionKey + "Img"] = await compressExtractedDataUrl(imgsInBlock[0]);
+            }
+          } else {
+            if (rawText) {
+              currentQ.pertanyaan += (currentQ.pertanyaan ? "\n" : "") + rawText;
+            }
+            if (imgsInBlock.length > 0) {
+              currentQ.gambarList = currentQ.gambarList.concat(imgsInBlock);
+            }
+          }
+        }
+
+        await finalizeCurrentQuestion();
+
+        if (parsedQuestions.length === 0) {
+          alert("Tidak ada butir soal yang dikenali dari file Word.\nPastikan format penomoran soal diawali angka & titik (contoh: 1. Pertanyaan...) serta opsi A. B. C. D. E. dan KUNCI: A.");
+          stEl.innerText = "Import Word gagal: format soal tidak ditemukan.";
+          return;
+        }
+
+        var gantiSemua = confirm(
+          "Ditemukan " + parsedQuestions.length + " soal dari file Word.\n\n" +
+          "Klik OK untuk MENGGANTI seluruh soal pada paket ini dengan soal dari Word.\n" +
+          "Klik Cancel untuk MENAMBAHKAN soal dari Word ke daftar soal yang sudah ada."
+        );
+
+        if (gantiSemua) {
+          editorSoalState.items = parsedQuestions;
+        } else {
+          editorSoalState.items = editorSoalState.items.concat(parsedQuestions);
+        }
+
+        editorSoalState.currentIndex = 0;
+        renderDropdownSoalEdit();
+        muatFormButirSoalEdit(0);
+        stEl.innerText = "Berhasil mengimpor " + parsedQuestions.length + " soal dari Word. Klik 'Simpan Semua Perubahan Soal' untuk menyimpan ke database.";
+      } catch (err) {
+        stEl.innerText = "Gagal membaca file Word: " + err.message;
+        alert("Gagal membaca file Word (.docx): " + err.message + "\nPastikan file berformat .docx (bukan .doc lama).");
+      } finally {
+        event.target.value = "";
+      }
+    }
+
     async function simpanPerubahanBankSoal() {
       bacaFormButirSoalEditKeState();
       var btn = document.getElementById("btn-simpan-bank-soal");
@@ -2024,7 +2268,7 @@
           });
         });
 
-        var chunkSize = 20;
+        // Bagi chunk secara dinamis berdasarkan ukuran byte JSON agar tidak pernah melampaui batas 1MB Firestore
         var chunksRef = db.collection("bank_soal").doc(formId).collection("chunks");
         var oldChunksSnap = await chunksRef.get();
         var batch = db.batch();
@@ -2033,14 +2277,30 @@
         });
 
         var chunkIdx = 0;
-        for (var i = 0; i < itemsClean.length; i += chunkSize) {
-          var slice = itemsClean.slice(i, i + chunkSize);
-          var newChunkDoc = chunksRef.doc("chunk_" + chunkIdx);
-          batch.set(newChunkDoc, {
+        var currentSlice = [];
+        var currentBytes = 0;
+        var MAX_CHUNK_BYTES = 650000;
+
+        for (var i = 0; i < itemsClean.length; i++) {
+          var itemStr = JSON.stringify(itemsClean[i]);
+          if (currentSlice.length > 0 && (currentBytes + itemStr.length > MAX_CHUNK_BYTES || currentSlice.length >= 20)) {
+            batch.set(chunksRef.doc("chunk_" + chunkIdx), {
+              chunkIndex: chunkIdx,
+              itemsJson: JSON.stringify(currentSlice)
+            });
+            chunkIdx++;
+            currentSlice = [];
+            currentBytes = 0;
+          }
+          currentSlice.push(itemsClean[i]);
+          currentBytes += itemStr.length;
+        }
+
+        if (currentSlice.length > 0) {
+          batch.set(chunksRef.doc("chunk_" + chunkIdx), {
             chunkIndex: chunkIdx,
-            itemsJson: JSON.stringify(slice)
+            itemsJson: JSON.stringify(currentSlice)
           });
-          chunkIdx++;
         }
 
         batch.set(db.collection("bank_soal").doc(formId), {
@@ -2208,7 +2468,7 @@
           }
         }
         var rowColor = statusWarna === "kuning" ? "bg-yellow-50 hover:bg-yellow-100" : (statusWarna === "hijau" ? "bg-emerald-50 hover:bg-emerald-100" : "bg-white hover:bg-slate-50");
-        tb.innerHTML += `<tr class="${rowColor} border-b border-slate-200"><td class="px-4 py-3 font-medium">${escapeAttr(tglView)}<br><span class="text-xs text-slate-500">${escapeAttr(j.jamMulai || "")} - ${escapeAttr(j.jamSelesai || "")}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(j.mapel || "")}</td><td class="px-4 py-3">${escapeAttr(j.kelas || "")}</td><td class="px-4 py-3 font-mono font-bold text-purple-600">${escapeAttr(j.token || "")}</td><td class="px-4 py-3 text-center"><button onclick="bukaEditorSoalPaket('${escapeAttr(j.formId || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.linkForm || "")}')" class="text-emerald-600 hover:text-emerald-800 px-2" title="Edit Soal & Foto"><i class="fas fa-file-alt"></i></button><button onclick="bukaModalEditJadwal('${escapeAttr(docId)}', '${escapeAttr(j.tanggal || "")}', '${escapeAttr(j.jamMulai || "")}', '${escapeAttr(j.jamSelesai || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.token || "")}', '${escapeAttr(j.kelas || "")}', '${escapeAttr(j.status || "Aktif")}', '${escapeAttr(j.linkForm || "")}')" class="text-blue-500 hover:text-blue-700 px-2" title="Edit Jadwal"><i class="fas fa-edit"></i></button><button onclick="hapusJadwal('${escapeAttr(docId)}', '${escapeAttr(j.mapel || "")}')" class="text-red-500 hover:text-red-700 px-2" title="Hapus Jadwal"><i class="fas fa-trash"></i></button></td></tr>`;
+        tb.innerHTML += `<tr class="${rowColor} border-b border-slate-200"><td class="px-4 py-3 font-medium">${escapeAttr(tglView)}<br><span class="text-xs text-slate-500">${escapeAttr(j.jamMulai || "")} - ${escapeAttr(j.jamSelesai || "")}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(j.mapel || "")}</td><td class="px-4 py-3">${escapeAttr(j.kelas || "")}</td><td class="px-4 py-3 font-mono font-bold text-purple-600">${escapeAttr(j.token || "")}</td><td class="px-4 py-3 text-center"><button onclick="bukaEditorSoalPaket('${escapeAttr(j.formId || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.linkForm || "")}')" class="text-emerald-600 hover:text-emerald-800 px-2" title="Edit Soal, Foto & Word"><i class="fas fa-file-alt"></i></button><button onclick="bukaModalEditJadwal('${escapeAttr(docId)}', '${escapeAttr(j.tanggal || "")}', '${escapeAttr(j.jamMulai || "")}', '${escapeAttr(j.jamSelesai || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.token || "")}', '${escapeAttr(j.kelas || "")}', '${escapeAttr(j.status || "Aktif")}', '${escapeAttr(j.linkForm || "")}')" class="text-blue-500 hover:text-blue-700 px-2" title="Edit Jadwal"><i class="fas fa-edit"></i></button><button onclick="hapusJadwal('${escapeAttr(docId)}', '${escapeAttr(j.mapel || "")}')" class="text-red-500 hover:text-red-700 px-2" title="Hapus Jadwal"><i class="fas fa-trash"></i></button></td></tr>`;
       });
     }
 
