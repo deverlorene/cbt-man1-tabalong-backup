@@ -12,7 +12,7 @@
     <!-- Firebase SDK v10 Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="firebase-config.js?v=20261126v1"></script>
+    <script src="firebase-config.js?v=20261126v5"></script>
     <style>
       .anti-copas {
         -webkit-user-select: none;
@@ -79,7 +79,7 @@
         </div>
         <button type="button" onclick="keluarModePreview()" class="text-slate-400 hover:text-red-400 text-xs font-bold">Ke Login Siswa ➔</button>
       </div>
-      <p class="text-xs text-slate-400 mb-4">Pilih mata pelajaran yang sudah di-sync ke <code class="text-cyan-300">bank_soal</code> untuk melihat tampilan soal, gambar, dan opsi berurutan persis seperti Google Form.</p>
+      <p class="text-xs text-slate-400 mb-4">Pilih mata pelajaran yang sudah di-sync ke <code class="text-cyan-300">bank_soal</code> untuk melihat tampilan soal, gambar, dan opsi berurutan persis seperti tampilan ujian siswa.</p>
 
       <div class="space-y-4">
         <div>
@@ -423,9 +423,31 @@
         return "";
       }
 
-      // Validasi kecocokan paket jadwal dengan data siswa (Mencegah salah soal saat token sama per sesi)
+      function skorSpesifisitasJadwal_(ujian, userObj) {
+        if (!ujian || !userObj) return 0;
+        var kelasSiswa = String(userObj.kelas || "").trim().toUpperCase().replace(/\s+/g, " ");
+        var jenjangSiswa = ekstrakJenjangSiswa_(userObj);
+        var targetKelasRaw = String(ujian.kelas || "").trim().toUpperCase();
+        var mapelRaw = String(ujian.mapel || "").trim().toUpperCase();
+
+        var skor = 1;
+        if (jenjangSiswa && mapelRaw.indexOf(jenjangSiswa) > -1) skor += 10;
+        if (kelasSiswa && targetKelasRaw.indexOf(kelasSiswa) > -1) skor += 50;
+
+        var matchGrup = targetKelasRaw.match(/KELAS\s+(XII|XI|X)\s*\(([^)]+)\)/);
+        if (matchGrup && jenjangSiswa === matchGrup[1]) {
+          var rombelList = matchGrup[2].split(/[,;/]+/).map(function(r) {
+            return (jenjangSiswa + " " + r.trim()).replace(/\s+/g, " ").trim();
+          }).filter(Boolean);
+          if (rombelList.indexOf(kelasSiswa) !== -1) {
+            skor += 30 - rombelList.length;
+          }
+        }
+        return skor;
+      }
+
       function isJadwalCocokDenganSiswa_(ujian, userObj) {
-        if (!ujian || !userObj) return true;
+        if (!ujian || !userObj) return false;
         var kelasSiswa = String(userObj.kelas || "").trim().toUpperCase().replace(/\s+/g, " ");
         var jenjangSiswa = ekstrakJenjangSiswa_(userObj);
 
@@ -440,13 +462,13 @@
           }
         }
 
-        // 2. Jika kolom kelas umum, loloskan jika jenjang cocok
+        // 2. Jika kolom kelas kosong atau umum, loloskan
         if (!targetKelasRaw || targetKelasRaw === "SEMUA KELAS" || targetKelasRaw === "SEMUA" || targetKelasRaw === "ALL") {
           return true;
         }
 
-        // 3. Jika hanya tertulis jenjang saja (misal: "KELAS X" / "X")
-        if (targetKelasRaw === "KELAS " + jenjangSiswa || targetKelasRaw === jenjangSiswa) {
+        // 3. Jika hanya tertulis jenjang saja (misal: "KELAS X" atau "X")
+        if (jenjangSiswa && (targetKelasRaw === "KELAS " + jenjangSiswa || targetKelasRaw === jenjangSiswa)) {
           return true;
         }
 
@@ -458,15 +480,15 @@
           var hurufRombel = matchGrup[2].split(/[,;/]+/);
           hurufRombel.forEach(function(h) {
             var hClean = h.trim();
-            if (hClean) daftarRombelTarget.push(jjg + " " + hClean);
+            if (hClean) daftarRombelTarget.push((jjg + " " + hClean).replace(/\s+/g, " "));
           });
         } else {
           var splitBiasa = targetKelasRaw.replace(/\bKELAS\b/g, "").split(/[,;/]+/);
           splitBiasa.forEach(function(s) {
-            var sClean = s.trim();
+            var sClean = s.trim().replace(/\s+/g, " ");
             if (sClean) {
-              if (!sClean.startsWith("X ") && !sClean.startsWith("XI ") && !sClean.startsWith("XII ") && jenjangSiswa) {
-                daftarRombelTarget.push(jenjangSiswa + " " + sClean);
+              if (!/^X\s/.test(sClean) && !/^XI\s/.test(sClean) && !/^XII\s/.test(sClean) && jenjangSiswa) {
+                daftarRombelTarget.push((jenjangSiswa + " " + sClean).replace(/\s+/g, " "));
               } else {
                 daftarRombelTarget.push(sClean);
               }
@@ -474,11 +496,11 @@
           });
         }
 
-        if (daftarRombelTarget.length > 0) {
+        if (daftarRombelTarget.length > 0 && kelasSiswa) {
           return daftarRombelTarget.indexOf(kelasSiswa) !== -1;
         }
 
-        return true;
+        return false;
       }
 
       function isCountdownSedangBerjalan() {
@@ -1251,28 +1273,34 @@
         var t = document.getElementById("input-token").value.trim().toUpperCase();
         var err = document.getElementById("pesan-error-token");
         var boxRemedial = document.getElementById("box-remedial-panitia");
+        var btnToken = document.getElementById("btn-token");
+
         boxRemedial.classList.add("hidden");
         ujianTertundaRemedial = null;
         isIzinRemedialAktif = false;
 
-        if (t === "") {
-          err.innerText = "Token wajib diisi!";
+        function setErrorToken(msg) {
+          btnToken.innerText = "Submit Data & Token";
+          btnToken.disabled = false;
+          err.innerText = msg;
           err.classList.remove("hidden");
+        }
+
+        if (!t) {
+          setErrorToken("Token wajib diisi!");
           return;
         }
+
         err.classList.add("hidden");
-        document.getElementById("btn-token").innerText = "Memverifikasi...";
-        document.getElementById("btn-token").disabled = true;
+        btnToken.innerText = "Memverifikasi...";
+        btnToken.disabled = true;
 
         await pastikanTercatatHadir("submit_token");
 
         try {
           var snap = await db.collection("master_ujian").where("token", "==", t).get();
           if (snap.empty) {
-            document.getElementById("btn-token").innerText = "Submit Data & Token";
-            document.getElementById("btn-token").disabled = false;
-            err.innerText = "Token Ujian salah atau tidak ditemukan!";
-            err.classList.remove("hidden");
+            setErrorToken("Token Ujian salah atau tidak ditemukan!");
             return;
           }
 
@@ -1283,16 +1311,20 @@
             semuaJadwalToken.push(item);
           });
 
-          // Saring jadwal yang cocok dengan data siswa (kelas / angkatan / jenjang mapel)
-          var jadwalCocokSiswa = semuaJadwalToken.filter(function(j) {
-            return isJadwalCocokDenganSiswa_(j, dataUserAktif);
-          });
+          // Saring jadwal yang cocok dengan kelas/rombel/jenjang siswa lalu urutkan dari yang paling spesifik
+          var jadwalCocokSiswa = semuaJadwalToken
+            .filter(function(j) {
+              return isJadwalCocokDenganSiswa_(j, dataUserAktif);
+            })
+            .sort(function(a, b) {
+              return skorSpesifisitasJadwal_(b, dataUserAktif) - skorSpesifisitasJadwal_(a, dataUserAktif);
+            });
 
           if (jadwalCocokSiswa.length === 0) {
-            document.getElementById("btn-token").innerText = "Submit Data & Token";
-            document.getElementById("btn-token").disabled = false;
-            err.innerText = "Token ini tidak sesuai untuk data siswa Anda (" + (dataUserAktif.nama || "-") + " • Kelas " + (dataUserAktif.kelas || "-") + ").";
-            err.classList.remove("hidden");
+            setErrorToken(
+              "Token ini tidak sesuai untuk kelas/rombel Anda (" +
+              (dataUserAktif.nama || "-") + " • " + (dataUserAktif.kelas || "-") + ")."
+            );
             return;
           }
 
@@ -1301,12 +1333,11 @@
           var sisaDetik = 3600;
           var pesanWaktuTerakhir = "";
 
-          // Prioritaskan jadwal yang aktif pada jam sekarang (membaca langsung dari Firestore)
           for (var idx = 0; idx < jadwalCocokSiswa.length; idx++) {
             var cand = jadwalCocokSiswa[idx];
             var evalRes = hitungSisaDetikDariJadwal_(cand, now);
             if (evalRes.status !== "AKTIF") {
-              pesanWaktuTerakhir = evalRes.pesan;
+              if (!pesanWaktuTerakhir) pesanWaktuTerakhir = evalRes.pesan;
               continue;
             }
             ujian = cand;
@@ -1315,18 +1346,12 @@
           }
 
           if (!ujian) {
-            document.getElementById("btn-token").innerText = "Submit Data & Token";
-            document.getElementById("btn-token").disabled = false;
-            err.innerText = pesanWaktuTerakhir || "Jadwal ujian belum aktif untuk sesi saat ini.";
-            err.classList.remove("hidden");
+            setErrorToken(pesanWaktuTerakhir || "Jadwal ujian belum aktif untuk sesi saat ini.");
             return;
           }
 
           if (!ujian.formId) {
-            document.getElementById("btn-token").innerText = "Submit Data & Token";
-            document.getElementById("btn-token").disabled = false;
-            err.innerText = "ID Google Form belum tersinkron di Master Ujian.";
-            err.classList.remove("hidden");
+            setErrorToken("ID Google Form belum tersinkron di Master Ujian untuk paket " + (ujian.mapel || "-") + ".");
             return;
           }
 
@@ -1334,11 +1359,11 @@
           dataUserAktif.jadwalDocId = ujian._docId || "";
           await pastikanTercatatHadir("token_valid");
 
-          document.getElementById("btn-token").innerText = "Memeriksa Riwayat Ujian...";
+          btnToken.innerText = "Memeriksa Riwayat Ujian...";
           var statusRiwayat = await cekSudahSelesaiDiServer(dataUserAktif.nisn, ujian.mapel);
           if (statusRiwayat.sudahSelesai) {
-            document.getElementById("btn-token").innerText = "Submit Data & Token";
-            document.getElementById("btn-token").disabled = false;
+            btnToken.innerText = "Submit Data & Token";
+            btnToken.disabled = false;
             ujianTertundaRemedial = {
               mapel: ujian.mapel,
               formId: ujian.formId,
@@ -1361,17 +1386,15 @@
             sisaDetik: sisaDetik
           }, false);
         } catch (e) {
-          document.getElementById("btn-token").innerText = "Submit Data & Token";
-          document.getElementById("btn-token").disabled = false;
-          err.innerText = "Terjadi kesalahan: " + e.message;
-          err.classList.remove("hidden");
+          setErrorToken("Terjadi kesalahan: " + e.message);
         }
       }
 
       async function lanjutkanMuatSoalSetelahValidasi(paketUjian, modeRemedial) {
         var err = document.getElementById("pesan-error-token");
-        document.getElementById("btn-token").innerText = "Mengambil Soal...";
-        document.getElementById("btn-token").disabled = true;
+        var btnToken = document.getElementById("btn-token");
+        btnToken.innerText = "Mengambil Soal...";
+        btnToken.disabled = true;
 
         try {
           dataUserAktif.mapel = paketUjian.mapel;
@@ -1387,11 +1410,11 @@
             dataSoalBaru = dataSoalBaru.concat(arr);
           });
 
-          document.getElementById("btn-token").innerText = "Submit Data & Token";
-          document.getElementById("btn-token").disabled = false;
+          btnToken.innerText = "Submit Data & Token";
+          btnToken.disabled = false;
 
           if (dataSoalBaru.length === 0) {
-            err.innerText = "Soal belum di-Push ke Firebase oleh Admin! Jalankan menu 'Push Semua Soal Google Form' di Google Sheet.";
+            err.innerText = "Soal belum tersedia di Firebase untuk paket ini. Hubungi Admin atau Pengawas.";
             err.classList.remove("hidden");
             return;
           }
@@ -1431,7 +1454,6 @@
           }
 
           bankSoal = dataSoalBaru;
-          // Selalu pakai sisaDetik terbaru dari Firestore (bukan sisaWaktu dari cache sesi lama)
           totalDetikUjian = dataUserAktif.sisaDetik;
 
           if (modeRemedial || isIzinRemedialAktif) {
@@ -1446,8 +1468,8 @@
           }
           document.getElementById("kt-sisa").innerText = Math.floor(totalDetikUjian / 60) + " Menit " + (totalDetikUjian % 60) + " Detik";
         } catch (e) {
-          document.getElementById("btn-token").innerText = "Submit Data & Token";
-          document.getElementById("btn-token").disabled = false;
+          btnToken.innerText = "Submit Data & Token";
+          btnToken.disabled = false;
           err.innerText = "Terjadi kesalahan memuat soal: " + e.message;
           err.classList.remove("hidden");
         }
