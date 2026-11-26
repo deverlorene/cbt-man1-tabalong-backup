@@ -1,16 +1,15 @@
 // =========================================================================
 // KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG (SERVER 2)
-// Upgraded: Anti-Cache ExamBro & Sinkronisasi Waktu Jadwal
+// Upgraded: Anti-Cache ExamBro, Sinkronisasi Waktu & Kompresi/Upload Foto
 // =========================================================================
 
-const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v1";
+const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v2";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
 
 (function autoCleanStaleServerCache() {
   try {
     const savedVer = localStorage.getItem(CBT_VERSION_KEY);
     if (savedVer !== CBT_BUILD_VERSION) {
-      // Hapus cache master/jadwal lama & absensi lama agar tidak nyangkut di server/jam lama
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -28,7 +27,6 @@ const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
         localStorage.removeItem(k);
       });
 
-      // Bersihkan Cache Storage API pada WebView ExamBro jika tersedia
       if (typeof caches !== "undefined" && caches.keys) {
         caches.keys().then(function (names) {
           names.forEach(function (name) {
@@ -53,11 +51,12 @@ const firebaseConfig = {
   appId: "1:601426183735:web:ea6840d95592b34125a1b2"
 };
 
-// Inisialisasi Firebase & Firestore (Compat v10)
+// Inisialisasi Firebase, Firestore & Storage (Compat v10)
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
+const storage = (typeof firebase.storage === "function") ? firebase.storage() : null;
 
 function getTodayStr() {
   const d = new Date();
@@ -94,4 +93,83 @@ function parseJadwalDateTime(tanggalStr, jamStr, isEnd) {
   const sec = isEnd ? 59 : 0;
   const dt = new Date(yyyy, mm, dd, hh, min, sec);
   return isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Mengompres file gambar di browser sebelum diunggah ke Firebase Storage
+ * (atau fallback ke dataURL terkompresi jika Storage tidak tersedia).
+ */
+function compressImageFile(file, maxWidth, maxHeight, quality) {
+  const wMax = maxWidth || 1024;
+  const hMax = maxHeight || 1024;
+  const q = typeof quality === "number" ? quality : 0.78;
+
+  return new Promise(function (resolve, reject) {
+    if (!file || !file.type || !file.type.startsWith("image/")) {
+      reject(new Error("File harus berupa gambar (JPG, PNG, WEBP, dll.)."));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = function () {
+      reject(new Error("Gagal membaca file gambar."));
+    };
+    reader.onload = function (ev) {
+      const img = new Image();
+      img.onerror = function () {
+        reject(new Error("Format gambar tidak dapat diproses."));
+      };
+      img.onload = function () {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > wMax || height > hMax) {
+          const ratio = Math.min(wMax / width, hMax / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
+        const dataUrl = canvas.toDataURL(mimeType, q);
+
+        canvas.toBlob(function (blob) {
+          resolve({
+            blob: blob,
+            dataUrl: dataUrl,
+            mimeType: mimeType
+          });
+        }, mimeType, q);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Mengunggah foto soal/opsi ke Firebase Storage dan mengembalikan downloadURL.
+ * Jika Firebase Storage gagal/belum aktif, fallback ke dataUrl terkompresi.
+ */
+async function uploadSoalImage(file, folderPath) {
+  const compressed = await compressImageFile(file, 1024, 1024, 0.78);
+  if (storage && compressed.blob) {
+    try {
+      const ext = compressed.mimeType === "image/png" ? "png" : "jpg";
+      const fileName = `soal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+      const fullPath = `${sanitizeId(folderPath || "bank_soal")}/${fileName}`;
+      const ref = storage.ref().child(fullPath);
+      await ref.put(compressed.blob, { contentType: compressed.mimeType });
+      return await ref.getDownloadURL();
+    } catch (errStorage) {
+      console.warn("Fallback ke dataURL terkompresi karena Storage:", errStorage);
+      return compressed.dataUrl;
+    }
+  }
+  return compressed.dataUrl;
 }
