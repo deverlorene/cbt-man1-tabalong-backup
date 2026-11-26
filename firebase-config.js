@@ -1,9 +1,9 @@
 // =========================================================================
 // KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG (SERVER 2)
-// Upgraded: Anti-Cache ExamBro, Sinkronisasi Waktu & Fast Image Upload
+// Upgraded v4: Instant Local Image Processing (Zero Storage Hang) & Anti-Cache
 // =========================================================================
 
-const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v3";
+const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v4";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
 
 (function autoCleanStaleServerCache() {
@@ -51,12 +51,11 @@ const firebaseConfig = {
   appId: "1:601426183735:web:ea6840d95592b34125a1b2"
 };
 
-// Inisialisasi Firebase, Firestore & Storage (Compat v10)
+// Inisialisasi Firebase & Firestore (Compat v10)
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
-const storage = (typeof firebase.storage === "function") ? firebase.storage() : null;
 
 function getTodayStr() {
   const d = new Date();
@@ -96,17 +95,17 @@ function parseJadwalDateTime(tanggalStr, jamStr, isEnd) {
 }
 
 /**
- * Mengompres file gambar di browser sebelum disimpan.
- * Jika file sudah kecil (<= 120 KB) dan dimensi <= 960px, langsung baca tanpa re-encode berat.
+ * Memproses & mengompres gambar secara lokal (< 0.1 detik, tanpa network hang ke Firebase Storage).
+ * Gambar kecil <= 90 KB langsung dipakai instan; gambar besar otomatis dikompres ke max 800px WebP/JPEG.
  */
 function compressImageFile(file, maxWidth, maxHeight, quality) {
-  const wMax = maxWidth || 960;
-  const hMax = maxHeight || 960;
-  const q = typeof quality === "number" ? quality : 0.78;
+  const wMax = maxWidth || 800;
+  const hMax = maxHeight || 800;
+  const q = typeof quality === "number" ? quality : 0.72;
 
   return new Promise(function (resolve, reject) {
     if (!file || !file.type || !file.type.startsWith("image/")) {
-      reject(new Error("File harus berupa gambar (JPG, PNG, WEBP, dll.)."));
+      reject(new Error("File harus berupa gambar (JPG, PNG, WEBP)."));
       return;
     }
 
@@ -116,23 +115,26 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
     };
     reader.onload = function (ev) {
       const rawDataUrl = ev.target.result;
+      // Jika file sudah sangat ringan (<= 90 KB), langsung kembalikan tanpa perlu decode Image
+      if (file.size <= 90 * 1024) {
+        resolve({
+          dataUrl: rawDataUrl,
+          mimeType: file.type
+        });
+        return;
+      }
+
       const img = new Image();
       img.onerror = function () {
-        reject(new Error("Format gambar tidak dapat diproses."));
+        // Fallback jika WebView gagal decode dimensi
+        resolve({
+          dataUrl: rawDataUrl,
+          mimeType: file.type
+        });
       };
       img.onload = function () {
         let width = img.width;
         let height = img.height;
-
-        // Jika ukuran file sudah sangat ringan (<= 120 KB) dan dimensi tidak melebihi batas, langsung gunakan
-        if (file.size <= 120 * 1024 && width <= wMax && height <= hMax) {
-          resolve({
-            blob: file,
-            dataUrl: rawDataUrl,
-            mimeType: file.type
-          });
-          return;
-        }
 
         if (width > wMax || height > hMax) {
           const ratio = Math.min(wMax / width, hMax / height);
@@ -149,13 +151,10 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
         const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
         const dataUrl = canvas.toDataURL(mimeType, q);
 
-        canvas.toBlob(function (blob) {
-          resolve({
-            blob: blob || file,
-            dataUrl: dataUrl,
-            mimeType: mimeType
-          });
-        }, mimeType, q);
+        resolve({
+          dataUrl: dataUrl,
+          mimeType: mimeType
+        });
       };
       img.src = rawDataUrl;
     };
@@ -164,54 +163,10 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
 }
 
 /**
- * Mengunggah foto soal/opsi dengan batas tunggu cepat (timeout 3.5 detik untuk Firebase Storage).
- * Jika Firebase Storage belum diaktifkan/diblokir Rules (hang/retry), langsung otomatis fallback
- * ke dataUrl terkompresi dalam < 0.2 detik tanpa menunggu retry lama!
+ * Langsung memproses gambar secara instan di browser (0 network request saat pilih foto).
+ * Data gambar disimpan bersama paket soal saat klik 'Simpan Semua Perubahan Soal'.
  */
-async function uploadSoalImage(file, folderPath) {
-  const compressed = await compressImageFile(file, 960, 960, 0.78);
-
-  if (storage && compressed.blob) {
-    try {
-      const ext = compressed.mimeType === "image/png" ? "png" : "jpg";
-      const fileName = `soal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-      const fullPath = `${sanitizeId(folderPath || "bank_soal")}/${fileName}`;
-      const ref = storage.ref().child(fullPath);
-
-      const uploadTask = ref.put(compressed.blob, { contentType: compressed.mimeType });
-      const downloadUrl = await new Promise(function (resolve, reject) {
-        let settled = false;
-        const timer = setTimeout(function () {
-          if (settled) return;
-          settled = true;
-          try { uploadTask.cancel(); } catch (e) {}
-          reject(new Error("Storage timeout (kemungkinan bucket belum diaktifkan)."));
-        }, 3500);
-
-        uploadTask.on(
-          "state_changed",
-          null,
-          function (err) {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            reject(err);
-          },
-          function () {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            uploadTask.snapshot.ref.getDownloadURL().then(resolve).catch(reject);
-          }
-        );
-      });
-
-      return downloadUrl;
-    } catch (errStorage) {
-      console.warn("Storage dilewati, menggunakan penyimpanan langsung ke paket soal:", errStorage.message);
-      return compressed.dataUrl;
-    }
-  }
-
+async function uploadSoalImage(file) {
+  const compressed = await compressImageFile(file, 800, 800, 0.72);
   return compressed.dataUrl;
 }
