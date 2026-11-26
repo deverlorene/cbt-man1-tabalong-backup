@@ -3,13 +3,16 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Portal CBT ASAS - Siswa</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <!-- Firebase SDK v10 Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="firebase-config.js"></script>
+    <script src="firebase-config.js?v=20261126v1"></script>
     <style>
       .anti-copas {
         -webkit-user-select: none;
@@ -99,7 +102,7 @@
     <!-- 1. LOGIN PESERTA -->
     <div id="login-page" class="bg-slate-800 border border-cyan-500/30 p-8 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)] text-center w-full max-w-md relative overflow-hidden">
       <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
-      <h1 class="text-2xl font-bold text-cyan-400 mb-1 tracking-wider">CBT TKA MAN 1 TABALONG</h1>
+      <h1 class="text-2xl font-bold text-cyan-400 mb-1 tracking-wider">CBT ASAS MAN 1 TABALONG</h1>
       <p class="text-cyan-600/70 mb-6 text-sm font-semibold tracking-widest">ASESMEN BERBASIS KOMPUTER</p>
       <div class="space-y-4 text-left">
         <div>
@@ -116,6 +119,12 @@
         <button onclick="tombolLogin()" id="btn-login" class="bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold py-3 px-4 rounded-lg w-full hover:from-cyan-500 hover:to-blue-500 uppercase mt-4">Login Peserta ➔</button>
         <p id="pesan-error-login" class="text-red-400 text-sm font-bold text-center mt-2 hidden"></p>
         <div class="backup-banner hidden text-xs text-amber-300 bg-amber-950/50 border border-amber-700/50 rounded-lg px-3 py-2 mt-4 text-center"></div>
+        <div class="pt-3 border-t border-slate-700/70 flex items-center justify-between text-[11px] text-slate-400">
+          <span id="label-build-version">Server 2 • Sync Aktif</span>
+          <button type="button" onclick="segarkanCacheExamBro()" class="text-cyan-400 hover:text-cyan-300 font-semibold underline">
+            <i class="fas fa-sync-alt mr-1"></i>Segarkan Cache
+          </button>
+        </div>
       </div>
     </div>
 
@@ -286,6 +295,7 @@
       var totalDetikUjian = 3600;
       var intervalTimerUjian = null;
       var unsubscribeLockListener = null;
+      var unsubscribeJadwalListener = null;
 
       var ujianTertundaRemedial = null;
       var isIzinRemedialAktif = false;
@@ -297,6 +307,97 @@
           e.returnValue = "";
         }
       });
+
+      function segarkanCacheExamBro() {
+        try {
+          var backupQueueRaw = localStorage.getItem(KEY_BACKUP_QUEUE);
+          localStorage.clear();
+          sessionStorage.clear();
+          if (backupQueueRaw) {
+            localStorage.setItem(KEY_BACKUP_QUEUE, backupQueueRaw);
+          }
+          if (typeof CBT_BUILD_VERSION !== "undefined" && typeof CBT_VERSION_KEY !== "undefined") {
+            localStorage.setItem(CBT_VERSION_KEY, CBT_BUILD_VERSION);
+          }
+          if (typeof caches !== "undefined" && caches.keys) {
+            caches.keys().then(function(names) {
+              names.forEach(function(n) { caches.delete(n); });
+            }).catch(function() {});
+          }
+        } catch (e) {}
+        var sep = window.location.pathname.indexOf("?") > -1 ? "&" : "?";
+        window.location.href = window.location.pathname + sep + "refresh=" + Date.now();
+      }
+
+      function hitungSisaDetikDariJadwal_(jadwalObj, refDate) {
+        var now = refDate || new Date();
+        if (!jadwalObj || !jadwalObj.tanggal || !jadwalObj.jamMulai || !jadwalObj.jamSelesai) {
+          return { status: "AKTIF", sisaDetik: 3600, pesan: "" };
+        }
+        var startTime = (typeof parseJadwalDateTime === "function")
+          ? parseJadwalDateTime(jadwalObj.tanggal, jadwalObj.jamMulai, false)
+          : null;
+        var endTime = (typeof parseJadwalDateTime === "function")
+          ? parseJadwalDateTime(jadwalObj.tanggal, jadwalObj.jamSelesai, true)
+          : null;
+
+        if (!startTime || !endTime) {
+          var pTgl = String(jadwalObj.tanggal).trim().split("-");
+          if (pTgl.length === 3) {
+            var yyyy = parseInt(pTgl[0], 10), mm = parseInt(pTgl[1], 10) - 1, dd = parseInt(pTgl[2], 10);
+            var sM = String(jadwalObj.jamMulai).split(":");
+            var sS = String(jadwalObj.jamSelesai).split(":");
+            startTime = new Date(yyyy, mm, dd, parseInt(sM[0], 10), parseInt(sM[1], 10), 0);
+            endTime = new Date(yyyy, mm, dd, parseInt(sS[0], 10), parseInt(sS[1], 10), 59);
+          }
+        }
+
+        if (!startTime || !endTime) {
+          return { status: "AKTIF", sisaDetik: 3600, pesan: "" };
+        }
+
+        if (String(jadwalObj.status || "").toLowerCase() === "selesai" || String(jadwalObj.status || "").toLowerCase() === "nonaktif") {
+          return { status: "DITUTUP", sisaDetik: 0, pesan: "Sesi ujian telah ditutup oleh panitia." };
+        }
+        if (now < startTime) {
+          return { status: "BELUM_MULAI", sisaDetik: 0, pesan: "Ujian belum dimulai! Jadwal: " + jadwalObj.tanggal + " pukul " + jadwalObj.jamMulai };
+        }
+        if (now > endTime) {
+          return { status: "HABIS", sisaDetik: 0, pesan: "Waktu Ujian sudah berakhir pada " + jadwalObj.jamSelesai };
+        }
+        var sisa = Math.max(1, Math.floor((endTime.getTime() - now.getTime()) / 1000));
+        return { status: "AKTIF", sisaDetik: sisa, pesan: "" };
+      }
+
+      function hentikanListenerJadwal() {
+        if (unsubscribeJadwalListener) {
+          unsubscribeJadwalListener();
+          unsubscribeJadwalListener = null;
+        }
+      }
+
+      function dengarkanPerubahanJadwalRealtime(jadwalDocId) {
+        hentikanListenerJadwal();
+        if (isPreviewMode || !jadwalDocId || typeof db === "undefined") return;
+
+        unsubscribeJadwalListener = db.collection("master_ujian").doc(jadwalDocId).onSnapshot(function(doc) {
+          if (!doc.exists || !statusUjianBerlangsung) return;
+          var d = doc.data() || {};
+          var evalNow = hitungSisaDetikDariJadwal_(d, new Date());
+          if (evalNow.status === "AKTIF" && evalNow.sisaDetik > 0) {
+            totalDetikUjian = evalNow.sisaDetik;
+            dataUserAktif.sisaDetik = evalNow.sisaDetik;
+          } else if ((evalNow.status === "HABIS" || evalNow.status === "DITUTUP") && !isSedangMengumpulkan) {
+            hentikanListenerJadwal();
+            if (intervalTimerUjian) clearInterval(intervalTimerUjian);
+            if (timerSoalInterval) clearInterval(timerSoalInterval);
+            countdownAktifSoalIndex = null;
+            statusUjianBerlangsung = false;
+            alert("⏰ Waktu ujian telah berakhir sesuai jadwal terbaru!");
+            prosesPengumpulanNilai("Waktu Habis");
+          }
+        }, function() {});
+      }
 
       function normalisasiMapelKunci(m) {
         return String(m || "")
@@ -637,6 +738,7 @@
 
       async function bukaSelectorPreview() {
         statusUjianBerlangsung = false;
+        hentikanListenerJadwal();
         if (intervalTimerUjian) clearInterval(intervalTimerUjian);
         if (timerSoalInterval) clearInterval(timerSoalInterval);
         countdownAktifSoalIndex = null;
@@ -775,6 +877,10 @@
 
       document.addEventListener("DOMContentLoaded", function() {
         perbaruiBannerBackup();
+        var verEl = document.getElementById("label-build-version");
+        if (verEl && typeof CBT_BUILD_VERSION !== "undefined") {
+          verEl.innerText = "Server 2 • " + CBT_BUILD_VERSION;
+        }
 
         if (isPreviewMode) {
           bukaSelectorPreview().then(function() {
@@ -874,6 +980,7 @@
 
       function lanjutkanSetelahBukaKunci(metodeBukaKunci) {
         hentikanListenerKunci();
+        hentikanListenerJadwal();
         isTerkunci = false;
         document.getElementById("modal-lock").classList.add("hidden");
         document.getElementById("input-kode-buka-kunci").value = "";
@@ -957,6 +1064,7 @@
 
         if (jumlahPelanggaran >= MAX_PELANGGARAN) {
           hentikanListenerKunci();
+          hentikanListenerJadwal();
           isTerkunci = false;
           statusUjianBerlangsung = false;
           if (intervalTimerUjian) clearInterval(intervalTimerUjian);
@@ -1075,6 +1183,7 @@
       function logoutSiswa() {
         if (!confirm("Yakin ingin logout dari sesi Anda?")) return;
         hentikanListenerKunci();
+        hentikanListenerJadwal();
         localStorage.removeItem("cbt_siswa_session");
         location.reload();
       }
@@ -1139,7 +1248,7 @@
       }
 
       async function tombolSubmitToken() {
-        var t = document.getElementById("input-token").value.trim();
+        var t = document.getElementById("input-token").value.trim().toUpperCase();
         var err = document.getElementById("pesan-error-token");
         var boxRemedial = document.getElementById("box-remedial-panitia");
         boxRemedial.classList.add("hidden");
@@ -1169,7 +1278,9 @@
 
           var semuaJadwalToken = [];
           snap.forEach(function(doc) {
-            semuaJadwalToken.push(doc.data());
+            var item = doc.data() || {};
+            item._docId = doc.id;
+            semuaJadwalToken.push(item);
           });
 
           // Saring jadwal yang cocok dengan data siswa (kelas / angkatan / jenjang mapel)
@@ -1190,32 +1301,17 @@
           var sisaDetik = 3600;
           var pesanWaktuTerakhir = "";
 
-          // Prioritaskan jadwal yang aktif pada jam sekarang
+          // Prioritaskan jadwal yang aktif pada jam sekarang (membaca langsung dari Firestore)
           for (var idx = 0; idx < jadwalCocokSiswa.length; idx++) {
             var cand = jadwalCocokSiswa[idx];
-            if (cand.tanggal && cand.jamMulai && cand.jamSelesai) {
-              var pTgl = cand.tanggal.split("-");
-              var yyyy = parseInt(pTgl[0], 10), mm = parseInt(pTgl[1], 10) - 1, dd = parseInt(pTgl[2], 10);
-              var sM = cand.jamMulai.split(":");
-              var startTime = new Date(yyyy, mm, dd, parseInt(sM[0], 10), parseInt(sM[1], 10), 0);
-              var sS = cand.jamSelesai.split(":");
-              var endTime = new Date(yyyy, mm, dd, parseInt(sS[0], 10), parseInt(sS[1], 10), 0);
-
-              if (now < startTime) {
-                pesanWaktuTerakhir = "Ujian belum dimulai! Jadwal: " + cand.jamMulai;
-                continue;
-              }
-              if (now > endTime) {
-                pesanWaktuTerakhir = "Waktu Ujian sudah berakhir pada " + cand.jamSelesai;
-                continue;
-              }
-              ujian = cand;
-              sisaDetik = Math.floor((endTime.getTime() - now.getTime()) / 1000);
-              break;
-            } else {
-              ujian = cand;
-              break;
+            var evalRes = hitungSisaDetikDariJadwal_(cand, now);
+            if (evalRes.status !== "AKTIF") {
+              pesanWaktuTerakhir = evalRes.pesan;
+              continue;
             }
+            ujian = cand;
+            sisaDetik = evalRes.sisaDetik;
+            break;
           }
 
           if (!ujian) {
@@ -1235,6 +1331,7 @@
           }
 
           dataUserAktif.mapel = ujian.mapel;
+          dataUserAktif.jadwalDocId = ujian._docId || "";
           await pastikanTercatatHadir("token_valid");
 
           document.getElementById("btn-token").innerText = "Memeriksa Riwayat Ujian...";
@@ -1245,6 +1342,7 @@
             ujianTertundaRemedial = {
               mapel: ujian.mapel,
               formId: ujian.formId,
+              jadwalDocId: ujian._docId || "",
               token: t,
               sisaDetik: sisaDetik
             };
@@ -1258,6 +1356,7 @@
           await lanjutkanMuatSoalSetelahValidasi({
             mapel: ujian.mapel,
             formId: ujian.formId,
+            jadwalDocId: ujian._docId || "",
             token: t,
             sisaDetik: sisaDetik
           }, false);
@@ -1277,6 +1376,7 @@
         try {
           dataUserAktif.mapel = paketUjian.mapel;
           dataUserAktif.formId = paketUjian.formId;
+          dataUserAktif.jadwalDocId = paketUjian.jadwalDocId || "";
           dataUserAktif.token = paketUjian.token;
           dataUserAktif.sisaDetik = paketUjian.sisaDetik;
 
@@ -1331,6 +1431,7 @@
           }
 
           bankSoal = dataSoalBaru;
+          // Selalu pakai sisaDetik terbaru dari Firestore (bukan sisaWaktu dari cache sesi lama)
           totalDetikUjian = dataUserAktif.sisaDetik;
 
           if (modeRemedial || isIzinRemedialAktif) {
@@ -1369,6 +1470,7 @@
 
         statusUjianBerlangsung = true;
         mulaiTimerUjian();
+        dengarkanPerubahanJadwalRealtime(dataUserAktif.jadwalDocId);
         tampilkanSoal(indeksSoalSekarang);
 
         try {
@@ -1623,6 +1725,7 @@
         }
 
         hentikanListenerKunci();
+        hentikanListenerJadwal();
         if (timerSoalInterval) {
           clearInterval(timerSoalInterval);
           timerSoalInterval = null;
