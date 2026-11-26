@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Portal Staf - CBT</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <!-- Firebase SDK v10 Compat -->
+  <!-- Firebase SDK v10 Compat (App, Firestore & Storage untuk Upload Foto Soal) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="firebase-config.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+  <script src="firebase-config.js?v=20261126v2"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -285,10 +289,10 @@
         <!-- [I] GURU: PENILAIAN & EDIT SOAL -->
         <div id="page-guru" class="page-section hidden space-y-6">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm gap-4">
-            <div><h3 class="font-bold text-slate-800">Dasbor Guru & Analisis Hasil</h3><p class="text-xs text-slate-500">Kelola soal ujian Anda dan unduh laporan nilai siswa dalam format CSV Excel.</p></div>
-            <div class="flex gap-2">
+            <div><h3 class="font-bold text-slate-800">Dasbor Guru & Analisis Hasil</h3><p class="text-xs text-slate-500">Kelola soal ujian Anda (termasuk upload foto soal & opsi) dan unduh laporan nilai siswa.</p></div>
+            <div class="flex gap-2 flex-wrap">
               <button onclick="loadGuruStats(true)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold"><i class="fas fa-sync-alt"></i></button>
-              <button onclick="bukaEditSoalGuru(event)" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-edit"></i> Edit Soal</button>
+              <button onclick="bukaEditSoalGuru(event)" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-edit"></i> Edit Soal & Foto</button>
               <button onclick="unduhCSVNilaiGuru()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><i class="fas fa-file-excel"></i> Unduh CSV</button>
             </div>
           </div>
@@ -384,6 +388,136 @@
     </div>
   </div>
 
+  <!-- MODAL FITUR EDIT SOAL + UPLOAD FOTO (GURU & ADMIN) -->
+  <div id="modal-edit-soal" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+      <div class="px-6 py-4 border-b flex items-center justify-between bg-slate-800 text-white shrink-0">
+        <div>
+          <h3 class="font-bold text-base" id="title-edit-soal">Editor Soal & Foto Ujian</h3>
+          <p class="text-xs text-slate-300" id="subtitle-edit-soal">Form ID: -</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <a id="link-gform-asli" href="#" target="_blank" rel="noopener" class="hidden bg-slate-700 hover:bg-slate-600 text-cyan-300 px-3 py-1.5 rounded text-xs font-bold">
+            <i class="fas fa-external-link-alt mr-1"></i> Buka GForm Asli
+          </a>
+          <button onclick="tutupModal('modal-edit-soal')" class="text-slate-300 hover:text-red-400 px-2 py-1"><i class="fas fa-times text-lg"></i></button>
+        </div>
+      </div>
+
+      <div class="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-50">
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-slate-200">
+          <div class="flex items-center gap-2 flex-wrap">
+            <label class="text-xs font-bold text-slate-600 uppercase">Pilih Butir Soal:</label>
+            <select id="select-nomor-soal-edit" onchange="pilihButirSoalEdit(this.value)" class="border border-slate-300 rounded px-3 py-1.5 text-sm font-bold text-slate-800"></select>
+            <button type="button" onclick="tambahButirSoalEdit()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold">
+              <i class="fas fa-plus mr-1"></i> Tambah Soal
+            </button>
+            <button type="button" onclick="hapusButirSoalEdit()" class="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded text-xs font-bold">
+              <i class="fas fa-trash mr-1"></i> Hapus Soal Ini
+            </button>
+          </div>
+          <span id="info-total-soal-edit" class="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">0 Soal</span>
+        </div>
+
+        <div class="bg-white p-5 rounded-lg border border-slate-200 space-y-4 text-sm">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Teks Pertanyaan</label>
+            <textarea id="edit-soal-pertanyaan" rows="3" class="w-full border border-slate-300 rounded-lg p-3 focus:outline-none focus:border-blue-500" placeholder="Tulis isi pertanyaan soal..."></textarea>
+          </div>
+
+          <!-- BAGIAN UPLOAD FOTO PERTANYAAN -->
+          <div class="p-3.5 bg-slate-50 border border-dashed border-slate-300 rounded-lg space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <label class="font-bold text-slate-700 text-xs uppercase tracking-wide">
+                <i class="fas fa-image text-blue-600 mr-1"></i> Foto / Gambar Pertanyaan
+              </label>
+              <label class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer inline-flex items-center gap-1.5">
+                <i class="fas fa-upload"></i> Upload Foto Soal
+                <input type="file" id="file-foto-soal" accept="image/*" multiple onchange="handleUploadFotoPertanyaan(event)" class="hidden">
+              </label>
+            </div>
+            <div id="preview-foto-soal-list" class="flex flex-wrap gap-3"></div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Keterangan / Deskripsi Tambahan (Opsional)</label>
+            <input type="text" id="edit-soal-deskripsi" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" placeholder="Catatan atau konteks soal (opsional)">
+          </div>
+
+          <!-- OPSI A - E + UPLOAD FOTO PER OPSI -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-slate-700">Opsi A</label>
+                <label class="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"><i class="fas fa-camera mr-1"></i>Foto A<input type="file" accept="image/*" onchange="handleUploadFotoOpsi('A', event)" class="hidden"></label>
+              </div>
+              <input type="text" id="edit-opsi-a" class="w-full border border-slate-300 rounded px-3 py-2 bg-white">
+              <div id="preview-opsi-a" class="hidden flex items-center gap-2"></div>
+            </div>
+
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-slate-700">Opsi B</label>
+                <label class="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"><i class="fas fa-camera mr-1"></i>Foto B<input type="file" accept="image/*" onchange="handleUploadFotoOpsi('B', event)" class="hidden"></label>
+              </div>
+              <input type="text" id="edit-opsi-b" class="w-full border border-slate-300 rounded px-3 py-2 bg-white">
+              <div id="preview-opsi-b" class="hidden flex items-center gap-2"></div>
+            </div>
+
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-slate-700">Opsi C</label>
+                <label class="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"><i class="fas fa-camera mr-1"></i>Foto C<input type="file" accept="image/*" onchange="handleUploadFotoOpsi('C', event)" class="hidden"></label>
+              </div>
+              <input type="text" id="edit-opsi-c" class="w-full border border-slate-300 rounded px-3 py-2 bg-white">
+              <div id="preview-opsi-c" class="hidden flex items-center gap-2"></div>
+            </div>
+
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-slate-700">Opsi D</label>
+                <label class="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"><i class="fas fa-camera mr-1"></i>Foto D<input type="file" accept="image/*" onchange="handleUploadFotoOpsi('D', event)" class="hidden"></label>
+              </div>
+              <input type="text" id="edit-opsi-d" class="w-full border border-slate-300 rounded px-3 py-2 bg-white">
+              <div id="preview-opsi-d" class="hidden flex items-center gap-2"></div>
+            </div>
+
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-slate-700">Opsi E</label>
+                <label class="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"><i class="fas fa-camera mr-1"></i>Foto E<input type="file" accept="image/*" onchange="handleUploadFotoOpsi('E', event)" class="hidden"></label>
+              </div>
+              <input type="text" id="edit-opsi-e" class="w-full border border-slate-300 rounded px-3 py-2 bg-white">
+              <div id="preview-opsi-e" class="hidden flex items-center gap-2"></div>
+            </div>
+
+            <div class="p-3 border border-emerald-200 rounded-lg bg-emerald-50/40 flex flex-col justify-center">
+              <label class="block font-bold text-emerald-800 mb-1">Kunci Jawaban Benar</label>
+              <select id="edit-soal-kunci" class="w-full border border-emerald-400 bg-white rounded px-3 py-2 font-bold">
+                <option value="">-- Pilih Kunci --</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-6 py-4 border-t flex items-center justify-between bg-slate-50 shrink-0">
+        <span id="status-simpan-soal" class="text-xs text-slate-500 font-semibold">Perubahan disimpan langsung ke koleksi bank_soal Firestore.</span>
+        <div class="flex gap-2">
+          <button type="button" onclick="tutupModal('modal-edit-soal')" class="px-4 py-2 border rounded-lg font-semibold text-slate-600 text-sm">Tutup</button>
+          <button type="button" id="btn-simpan-bank-soal" onclick="simpanPerubahanBankSoal()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-sm shadow-sm">
+            <i class="fas fa-save mr-1"></i> Simpan Semua Perubahan Soal
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
 
@@ -395,6 +529,15 @@
     var PAGE_SIZE_TABEL = 50;
     var currentPageHasil = 1;
     var currentPageRuang = 1;
+
+    // State Fitur Edit Soal + Foto
+    var editorSoalState = {
+      formId: "",
+      mapel: "",
+      linkForm: "",
+      items: [],
+      currentIndex: 0
+    };
 
     var memCache = {
       siswa: null,
@@ -430,7 +573,8 @@
     }
 
     function getCacheKey(name) {
-      return "CBT_STAFF_CACHE_" + name;
+      var verSuffix = (typeof CBT_BUILD_VERSION !== "undefined") ? ("_" + CBT_BUILD_VERSION) : "";
+      return "CBT_STAFF_CACHE_" + name + verSuffix;
     }
 
     function readStorageCache(name) {
@@ -464,6 +608,7 @@
       clearMasterCache();
       memCache.hasil = null;
       memCache.logAktivitas = null;
+      dataRuangGlobal = [];
       alert("Cache dibersihkan. Data akan diambil ulang saat Anda membuka atau menekan Refresh pada menu terkait.");
       if (currentUser && currentUser.role === "admin") {
         await refreshAdminStats(true);
@@ -646,7 +791,7 @@
       else if (pageId === "page-data-siswa") loadDataSiswa(false);
       else if (pageId === "page-data-guru") loadDataGuru(false);
       else if (pageId === "page-data-pengawas") loadDataPengawas(false);
-      else if (pageId === "page-jadwal-ujian") loadDataJadwal(false);
+      else if (pageId === "page-jadwal-ujian") loadDataJadwal(true);
       else if (pageId === "page-guru") loadGuruStats(false);
       else if (pageId === "page-pengawas") loadDataLogPengawas(false);
       else if (pageId === "page-hasil-ujian") loadHasilUjianAdmin(false);
@@ -655,7 +800,9 @@
 
     function tutupModal(id) {
       document.getElementById(id).classList.add("hidden");
-      editState = { mode: false, type: "", id1: "", id2: "" };
+      if (id !== "modal-edit-soal") {
+        editState = { mode: false, type: "", id1: "", id2: "" };
+      }
     }
 
     async function getMasterCollectionCached(colName, cacheKey, forceRefresh) {
@@ -752,8 +899,8 @@
       if (!j) return "";
       var tglStr = String(j.tanggal || "").trim();
       var hariTgl = formatHariTanggalIndo(tglStr);
-      var jm = String(j.jamMulai || "").trim().substring(0, 5);
-      var js = String(j.jamSelesai || "").trim().substring(0, 5);
+      var jm = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamMulai) : String(j.jamMulai || "").trim().substring(0, 5);
+      var js = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamSelesai) : String(j.jamSelesai || "").trim().substring(0, 5);
       var jamStr = "";
       if (jm && js) jamStr = jm + " - " + js;
       else if (jm) jamStr = "Mulai " + jm;
@@ -767,12 +914,13 @@
     function buatKunciSesi(j) {
       if (!j) return "";
       var tgl = String(j.tanggal || "").trim();
-      var jm = String(j.jamMulai || "").trim().substring(0, 5);
-      var js = String(j.jamSelesai || "").trim().substring(0, 5);
+      var jm = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamMulai) : String(j.jamMulai || "").trim().substring(0, 5);
+      var js = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamSelesai) : String(j.jamSelesai || "").trim().substring(0, 5);
       return tgl + "|" + jm + "-" + js;
     }
 
     function normJamHhMm(jStr) {
+      if (typeof normalizeTimeHHMM === "function") return normalizeTimeHHMM(jStr);
       var raw = String(jStr || "").trim();
       if (!raw) return "";
       var parts = raw.split(":");
@@ -790,25 +938,21 @@
       if (String(jadwalObj.status || "").toLowerCase() === "selesai") {
         return { label: "Jadwal Ditutup/Selesai", kode: "DITUTUP" };
       }
-      if (jadwalObj.tanggal && jmNorm && jsNorm) {
-        var pTgl = String(jadwalObj.tanggal).trim().split("-");
-        if (pTgl.length === 3) {
-          var yyyy = parseInt(pTgl[0], 10);
-          var mm = parseInt(pTgl[1], 10) - 1;
-          var dd = parseInt(pTgl[2], 10);
-          var sM = jmNorm.split(":");
-          var sS = jsNorm.split(":");
-          var startTime = new Date(yyyy, mm, dd, parseInt(sM[0] || 0, 10), parseInt(sM[1] || 0, 10), 0);
-          var endTime = new Date(yyyy, mm, dd, parseInt(sS[0] || 23, 10), parseInt(sS[1] || 59, 10), 59);
+      var startTime = (typeof parseJadwalDateTime === "function")
+        ? parseJadwalDateTime(jadwalObj.tanggal, jmNorm, false)
+        : null;
+      var endTime = (typeof parseJadwalDateTime === "function")
+        ? parseJadwalDateTime(jadwalObj.tanggal, jsNorm, true)
+        : null;
 
-          if (nowDate < startTime) {
-            return { label: "Belum Dimulai (" + jmNorm + ")", kode: "BELUM_MULAI" };
-          }
-          if (nowDate > endTime) {
-            return { label: "Waktu Habis (" + jsNorm + ")", kode: "HABIS" };
-          }
-          return { label: "Berlangsung (" + jmNorm + "-" + jsNorm + ")", kode: "AKTIF" };
+      if (startTime && endTime) {
+        if (nowDate < startTime) {
+          return { label: "Belum Dimulai (" + jmNorm + ")", kode: "BELUM_MULAI" };
         }
+        if (nowDate > endTime) {
+          return { label: "Waktu Habis (" + jsNorm + ")", kode: "HABIS" };
+        }
+        return { label: "Berlangsung (" + jmNorm + "-" + jsNorm + ")", kode: "AKTIF" };
       }
       return { label: "Aktif", kode: "AKTIF" };
     }
@@ -1542,17 +1686,382 @@
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
+    // FITUR EDIT SOAL + UPLOAD FOTO: Buka editor soal untuk Guru atau Admin
     async function bukaEditSoalGuru(event) {
-      var btn = event.currentTarget, orig = btn.innerHTML;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuka...';
-      var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", false);
-      btn.innerHTML = orig;
-      var linkForm = "";
-      jadwalList.forEach(function(item) {
-        if (!linkForm && item.mapel === currentUser.mapel && item.linkForm) linkForm = item.linkForm;
+      var btn = event && event.currentTarget ? event.currentTarget : null;
+      var orig = btn ? btn.innerHTML : "";
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memuat Soal...';
+
+      try {
+        var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", false);
+        var cocok = null;
+        var targetMapel = String((currentUser && currentUser.mapel) || "").trim().toLowerCase();
+
+        jadwalList.forEach(function(item) {
+          if (cocok) return;
+          var m = String(item.mapel || "").trim().toLowerCase();
+          if (targetMapel && (m === targetMapel || m.indexOf(targetMapel) > -1 || targetMapel.indexOf(m) > -1)) {
+            cocok = item;
+          }
+        });
+
+        if (btn) btn.innerHTML = orig;
+
+        if (!cocok || !cocok.formId) {
+          if (cocok && cocok.linkForm) {
+            window.open(cocok.linkForm, "_blank");
+          } else {
+            alert("Paket soal / Form ID belum diatur untuk mapel " + (currentUser.mapel || "-") + " di Master Ujian.");
+          }
+          return;
+        }
+
+        await bukaEditorSoalPaket(cocok.formId, cocok.mapel || currentUser.mapel, cocok.linkForm || "");
+      } catch (e) {
+        if (btn) btn.innerHTML = orig;
+        alert("Gagal membuka editor soal: " + e.message);
+      }
+    }
+
+    async function bukaEditorSoalPaket(formId, mapel, linkForm) {
+      var cleanFormId = String(formId || "").trim();
+      var matchUrl = cleanFormId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (matchUrl && matchUrl[1]) cleanFormId = matchUrl[1];
+
+      if (!cleanFormId) {
+        alert("Form ID tidak valid.");
+        return;
+      }
+
+      document.getElementById("title-edit-soal").innerText = "Editor Soal & Foto — " + (mapel || "Paket Ujian");
+      document.getElementById("subtitle-edit-soal").innerText = "Form ID: " + cleanFormId;
+
+      var linkEl = document.getElementById("link-gform-asli");
+      if (linkForm) {
+        linkEl.href = linkForm;
+        linkEl.classList.remove("hidden");
+      } else {
+        linkEl.classList.add("hidden");
+      }
+
+      document.getElementById("status-simpan-soal").innerText = "Mengambil butir soal & gambar dari koleksi bank_soal...";
+      document.getElementById("modal-edit-soal").classList.remove("hidden");
+
+      try {
+        var chunksSnap = await db.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
+        var allItems = [];
+        chunksSnap.forEach(function(doc) {
+          var arr = JSON.parse(doc.data().itemsJson || "[]");
+          if (Array.isArray(arr)) allItems = allItems.concat(arr);
+        });
+
+        if (allItems.length === 0) {
+          allItems.push({
+            no: 1,
+            pertanyaan: "",
+            deskripsi: "",
+            gambarList: [],
+            opsiA: "",
+            opsiB: "",
+            opsiC: "",
+            opsiD: "",
+            opsiE: "",
+            opsiAImg: "",
+            opsiBImg: "",
+            opsiCImg: "",
+            opsiDImg: "",
+            opsiEImg: "",
+            kunci: ""
+          });
+        } else {
+          allItems = allItems.map(function(item) {
+            var gList = Array.isArray(item.gambarList) ? item.gambarList.slice() : (item.gambar ? [item.gambar] : []);
+            return Object.assign({}, item, {
+              gambarList: gList,
+              opsiAImg: item.opsiAImg || "",
+              opsiBImg: item.opsiBImg || "",
+              opsiCImg: item.opsiCImg || "",
+              opsiDImg: item.opsiDImg || "",
+              opsiEImg: item.opsiEImg || ""
+            });
+          });
+        }
+
+        editorSoalState = {
+          formId: cleanFormId,
+          mapel: mapel || "Ujian",
+          linkForm: linkForm || "",
+          items: allItems,
+          currentIndex: 0
+        };
+
+        renderDropdownSoalEdit();
+        muatFormButirSoalEdit(0);
+        document.getElementById("status-simpan-soal").innerText = "Siap diedit (" + allItems.length + " soal dimuat).";
+      } catch (e) {
+        document.getElementById("status-simpan-soal").innerText = "Gagal memuat soal: " + e.message;
+      }
+    }
+
+    function renderDropdownSoalEdit() {
+      var sel = document.getElementById("select-nomor-soal-edit");
+      var totEl = document.getElementById("info-total-soal-edit");
+      var list = editorSoalState.items || [];
+      sel.innerHTML = "";
+      list.forEach(function(item, idx) {
+        var cuplikan = String(item.pertanyaan || "").replace(/\s+/g, " ").trim().substring(0, 28);
+        var hasImgBadge = (item.gambarList && item.gambarList.length > 0) ? " [📷]" : "";
+        var opt = document.createElement("option");
+        opt.value = String(idx);
+        opt.text = "Soal #" + (idx + 1) + hasImgBadge + (cuplikan ? " — " + cuplikan : "");
+        if (idx === editorSoalState.currentIndex) opt.selected = true;
+        sel.appendChild(opt);
       });
-      if (linkForm) window.open(linkForm, "_blank");
-      else alert("Link Edit Soal belum diatur oleh Admin di Menu Master Ujian.");
+      totEl.innerText = list.length + " Soal";
+    }
+
+    function bacaFormButirSoalEditKeState() {
+      var list = editorSoalState.items || [];
+      var idx = editorSoalState.currentIndex;
+      if (!list[idx]) return;
+      list[idx].pertanyaan = document.getElementById("edit-soal-pertanyaan").value;
+      list[idx].deskripsi = document.getElementById("edit-soal-deskripsi").value;
+      list[idx].opsiA = document.getElementById("edit-opsi-a").value;
+      list[idx].opsiB = document.getElementById("edit-opsi-b").value;
+      list[idx].opsiC = document.getElementById("edit-opsi-c").value;
+      list[idx].opsiD = document.getElementById("edit-opsi-d").value;
+      list[idx].opsiE = document.getElementById("edit-opsi-e").value;
+      list[idx].kunci = document.getElementById("edit-soal-kunci").value;
+    }
+
+    function renderPreviewFotoPertanyaan(q) {
+      var container = document.getElementById("preview-foto-soal-list");
+      container.innerHTML = "";
+      var gList = Array.isArray(q.gambarList) ? q.gambarList : (q.gambar ? [q.gambar] : []);
+      if (gList.length === 0) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">Belum ada foto pada soal ini.</span>';
+        return;
+      }
+      gList.forEach(function(url, imgIdx) {
+        if (!url) return;
+        var card = document.createElement("div");
+        card.className = "relative group border border-slate-300 rounded-lg bg-white p-1.5 shadow-sm";
+        card.innerHTML =
+          '<img src="' + escapeAttr(url) + '" class="h-28 max-w-[200px] object-contain rounded">' +
+          '<button type="button" onclick="hapusFotoPertanyaan(' + imgIdx + ')" class="mt-1.5 w-full bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold py-1 px-2 rounded flex items-center justify-center gap-1">' +
+          '<i class="fas fa-trash"></i> Hapus Foto</button>';
+        container.appendChild(card);
+      });
+    }
+
+    function renderPreviewFotoOpsi(huruf, imgUrl) {
+      var keyLower = huruf.toLowerCase();
+      var box = document.getElementById("preview-opsi-" + keyLower);
+      if (!box) return;
+      if (!imgUrl) {
+        box.innerHTML = "";
+        box.classList.add("hidden");
+        return;
+      }
+      box.classList.remove("hidden");
+      box.innerHTML =
+        '<img src="' + escapeAttr(imgUrl) + '" class="h-16 max-w-[140px] object-contain border border-slate-300 rounded bg-white p-1">' +
+        '<button type="button" onclick="hapusFotoOpsi(\'' + huruf + '\')" class="bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-2.5 py-1 rounded">' +
+        '<i class="fas fa-trash"></i> Hapus</button>';
+    }
+
+    function muatFormButirSoalEdit(idx) {
+      var list = editorSoalState.items || [];
+      var safeIdx = Math.max(0, Math.min(Number(idx) || 0, list.length - 1));
+      editorSoalState.currentIndex = safeIdx;
+      var q = list[safeIdx] || {};
+
+      document.getElementById("select-nomor-soal-edit").value = String(safeIdx);
+      document.getElementById("edit-soal-pertanyaan").value = q.pertanyaan || "";
+      document.getElementById("edit-soal-deskripsi").value = q.deskripsi || "";
+      document.getElementById("edit-opsi-a").value = q.opsiA || "";
+      document.getElementById("edit-opsi-b").value = q.opsiB || "";
+      document.getElementById("edit-opsi-c").value = q.opsiC || "";
+      document.getElementById("edit-opsi-d").value = q.opsiD || "";
+      document.getElementById("edit-opsi-e").value = q.opsiE || "";
+      document.getElementById("edit-soal-kunci").value = String(q.kunci || "").toUpperCase();
+
+      renderPreviewFotoPertanyaan(q);
+      renderPreviewFotoOpsi("A", q.opsiAImg || "");
+      renderPreviewFotoOpsi("B", q.opsiBImg || "");
+      renderPreviewFotoOpsi("C", q.opsiCImg || "");
+      renderPreviewFotoOpsi("D", q.opsiDImg || "");
+      renderPreviewFotoOpsi("E", q.opsiEImg || "");
+    }
+
+    async function handleUploadFotoPertanyaan(event) {
+      var files = event.target && event.target.files ? Array.from(event.target.files) : [];
+      if (files.length === 0) return;
+
+      var q = editorSoalState.items[editorSoalState.currentIndex];
+      if (!q) return;
+      if (!Array.isArray(q.gambarList)) q.gambarList = q.gambar ? [q.gambar] : [];
+
+      var stEl = document.getElementById("status-simpan-soal");
+      stEl.innerText = "Mengompres & mengunggah " + files.length + " foto pertanyaan...";
+
+      try {
+        for (var i = 0; i < files.length; i++) {
+          var uploadedUrl = await uploadSoalImage(files[i], "bank_soal/" + editorSoalState.formId);
+          q.gambarList.push(uploadedUrl);
+        }
+        q.gambar = q.gambarList[0] || "";
+        renderPreviewFotoPertanyaan(q);
+        renderDropdownSoalEdit();
+        stEl.innerText = "Foto pertanyaan berhasil diunggah. Klik 'Simpan Semua Perubahan Soal' untuk menyimpan permanen.";
+      } catch (err) {
+        stEl.innerText = "Gagal mengunggah foto: " + err.message;
+        alert("Gagal mengunggah foto: " + err.message);
+      } finally {
+        event.target.value = "";
+      }
+    }
+
+    function hapusFotoPertanyaan(imgIdx) {
+      var q = editorSoalState.items[editorSoalState.currentIndex];
+      if (!q || !Array.isArray(q.gambarList)) return;
+      q.gambarList.splice(imgIdx, 1);
+      q.gambar = q.gambarList[0] || "";
+      renderPreviewFotoPertanyaan(q);
+      renderDropdownSoalEdit();
+    }
+
+    async function handleUploadFotoOpsi(huruf, event) {
+      var file = event.target && event.target.files ? event.target.files[0] : null;
+      if (!file) return;
+
+      var q = editorSoalState.items[editorSoalState.currentIndex];
+      if (!q) return;
+
+      var stEl = document.getElementById("status-simpan-soal");
+      stEl.innerText = "Mengompres & mengunggah foto untuk Opsi " + huruf + "...";
+
+      try {
+        var uploadedUrl = await uploadSoalImage(file, "bank_soal/" + editorSoalState.formId);
+        q["opsi" + huruf + "Img"] = uploadedUrl;
+        renderPreviewFotoOpsi(huruf, uploadedUrl);
+        stEl.innerText = "Foto Opsi " + huruf + " berhasil diunggah. Jangan lupa klik Simpan.";
+      } catch (err) {
+        stEl.innerText = "Gagal mengunggah foto Opsi " + huruf + ": " + err.message;
+        alert("Gagal mengunggah foto opsi: " + err.message);
+      } finally {
+        event.target.value = "";
+      }
+    }
+
+    function hapusFotoOpsi(huruf) {
+      var q = editorSoalState.items[editorSoalState.currentIndex];
+      if (!q) return;
+      q["opsi" + huruf + "Img"] = "";
+      renderPreviewFotoOpsi(huruf, "");
+    }
+
+    function pilihButirSoalEdit(valIdx) {
+      bacaFormButirSoalEditKeState();
+      renderDropdownSoalEdit();
+      muatFormButirSoalEdit(Number(valIdx));
+    }
+
+    function tambahButirSoalEdit() {
+      bacaFormButirSoalEditKeState();
+      editorSoalState.items.push({
+        no: editorSoalState.items.length + 1,
+        pertanyaan: "",
+        deskripsi: "",
+        gambarList: [],
+        opsiA: "",
+        opsiB: "",
+        opsiC: "",
+        opsiD: "",
+        opsiE: "",
+        opsiAImg: "",
+        opsiBImg: "",
+        opsiCImg: "",
+        opsiDImg: "",
+        opsiEImg: "",
+        kunci: ""
+      });
+      editorSoalState.currentIndex = editorSoalState.items.length - 1;
+      renderDropdownSoalEdit();
+      muatFormButirSoalEdit(editorSoalState.currentIndex);
+    }
+
+    function hapusButirSoalEdit() {
+      if (editorSoalState.items.length <= 1) {
+        alert("Minimal harus ada 1 butir soal.");
+        return;
+      }
+      if (!confirm("Hapus Soal #" + (editorSoalState.currentIndex + 1) + "?")) return;
+      editorSoalState.items.splice(editorSoalState.currentIndex, 1);
+      if (editorSoalState.currentIndex >= editorSoalState.items.length) {
+        editorSoalState.currentIndex = editorSoalState.items.length - 1;
+      }
+      renderDropdownSoalEdit();
+      muatFormButirSoalEdit(editorSoalState.currentIndex);
+    }
+
+    async function simpanPerubahanBankSoal() {
+      bacaFormButirSoalEditKeState();
+      var btn = document.getElementById("btn-simpan-bank-soal");
+      var stEl = document.getElementById("status-simpan-soal");
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Menyimpan...';
+      stEl.innerText = "Menyimpan perubahan soal & foto ke Firestore bank_soal...";
+
+      try {
+        var formId = editorSoalState.formId;
+        var itemsClean = editorSoalState.items.map(function(item, i) {
+          var gList = Array.isArray(item.gambarList) ? item.gambarList.filter(Boolean) : (item.gambar ? [item.gambar] : []);
+          return Object.assign({}, item, {
+            no: i + 1,
+            gambarList: gList,
+            gambar: gList[0] || ""
+          });
+        });
+
+        var chunkSize = 20;
+        var chunksRef = db.collection("bank_soal").doc(formId).collection("chunks");
+        var oldChunksSnap = await chunksRef.get();
+        var batch = db.batch();
+        oldChunksSnap.forEach(function(doc) {
+          batch.delete(doc.ref);
+        });
+
+        var chunkIdx = 0;
+        for (var i = 0; i < itemsClean.length; i += chunkSize) {
+          var slice = itemsClean.slice(i, i + chunkSize);
+          var newChunkDoc = chunksRef.doc("chunk_" + chunkIdx);
+          batch.set(newChunkDoc, {
+            chunkIndex: chunkIdx,
+            itemsJson: JSON.stringify(slice)
+          });
+          chunkIdx++;
+        }
+
+        batch.set(db.collection("bank_soal").doc(formId), {
+          mapel: editorSoalState.mapel,
+          formId: formId,
+          totalSoal: itemsClean.length,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        await batch.commit();
+        await catatAktivitasAdmin("Mengedit bank soal & foto (" + itemsClean.length + " soal) untuk: " + editorSoalState.mapel + " [" + formId + "]");
+
+        stEl.innerText = "Berhasil disimpan (" + itemsClean.length + " soal).";
+        alert("Perubahan soal & foto berhasil disimpan ke bank_soal!");
+      } catch (e) {
+        stEl.innerText = "Gagal menyimpan soal: " + e.message;
+        alert("Gagal menyimpan soal: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i> Simpan Semua Perubahan Soal';
+      }
     }
 
     async function loadDataLogPengawas(forceRefresh) {
@@ -1699,7 +2208,7 @@
           }
         }
         var rowColor = statusWarna === "kuning" ? "bg-yellow-50 hover:bg-yellow-100" : (statusWarna === "hijau" ? "bg-emerald-50 hover:bg-emerald-100" : "bg-white hover:bg-slate-50");
-        tb.innerHTML += `<tr class="${rowColor} border-b border-slate-200"><td class="px-4 py-3 font-medium">${escapeAttr(tglView)}<br><span class="text-xs text-slate-500">${escapeAttr(j.jamMulai || "")} - ${escapeAttr(j.jamSelesai || "")}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(j.mapel || "")}</td><td class="px-4 py-3">${escapeAttr(j.kelas || "")}</td><td class="px-4 py-3 font-mono font-bold text-purple-600">${escapeAttr(j.token || "")}</td><td class="px-4 py-3 text-center"><button onclick="bukaModalEditJadwal('${escapeAttr(docId)}', '${escapeAttr(j.tanggal || "")}', '${escapeAttr(j.jamMulai || "")}', '${escapeAttr(j.jamSelesai || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.token || "")}', '${escapeAttr(j.kelas || "")}', '${escapeAttr(j.status || "Aktif")}', '${escapeAttr(j.linkForm || "")}')" class="text-blue-500 hover:text-blue-700 px-2"><i class="fas fa-edit"></i></button><button onclick="hapusJadwal('${escapeAttr(docId)}', '${escapeAttr(j.mapel || "")}')" class="text-red-500 hover:text-red-700 px-2"><i class="fas fa-trash"></i></button></td></tr>`;
+        tb.innerHTML += `<tr class="${rowColor} border-b border-slate-200"><td class="px-4 py-3 font-medium">${escapeAttr(tglView)}<br><span class="text-xs text-slate-500">${escapeAttr(j.jamMulai || "")} - ${escapeAttr(j.jamSelesai || "")}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(j.mapel || "")}</td><td class="px-4 py-3">${escapeAttr(j.kelas || "")}</td><td class="px-4 py-3 font-mono font-bold text-purple-600">${escapeAttr(j.token || "")}</td><td class="px-4 py-3 text-center"><button onclick="bukaEditorSoalPaket('${escapeAttr(j.formId || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.linkForm || "")}')" class="text-emerald-600 hover:text-emerald-800 px-2" title="Edit Soal & Foto"><i class="fas fa-file-alt"></i></button><button onclick="bukaModalEditJadwal('${escapeAttr(docId)}', '${escapeAttr(j.tanggal || "")}', '${escapeAttr(j.jamMulai || "")}', '${escapeAttr(j.jamSelesai || "")}', '${escapeAttr(j.mapel || "")}', '${escapeAttr(j.token || "")}', '${escapeAttr(j.kelas || "")}', '${escapeAttr(j.status || "Aktif")}', '${escapeAttr(j.linkForm || "")}')" class="text-blue-500 hover:text-blue-700 px-2" title="Edit Jadwal"><i class="fas fa-edit"></i></button><button onclick="hapusJadwal('${escapeAttr(docId)}', '${escapeAttr(j.mapel || "")}')" class="text-red-500 hover:text-red-700 px-2" title="Hapus Jadwal"><i class="fas fa-trash"></i></button></td></tr>`;
       });
     }
 
@@ -1731,31 +2240,34 @@
       var formId = (m && m[1]) ? m[1] : "";
       var mapel = document.getElementById("in-jadwal-mapel").value.trim();
       var kelas = document.getElementById("in-jadwal-kelas").value.trim();
-      var newDocId = formId ? safeSanitizeId(formId) : safeSanitizeId(mapel + "_" + kelas);
+      var jamMulai = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(document.getElementById("in-jadwal-mulai").value) : document.getElementById("in-jadwal-mulai").value.trim();
+      var jamSelesai = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(document.getElementById("in-jadwal-selesai").value) : document.getElementById("in-jadwal-selesai").value.trim();
+
+      var targetDocId = (editState.mode && editState.id1)
+        ? editState.id1
+        : safeSanitizeId((formId ? formId + "_" : "") + mapel + "_" + kelas + "_" + Date.now().toString().slice(-4));
 
       var d = {
-        docId: newDocId,
+        docId: targetDocId,
         tanggal: document.getElementById("in-jadwal-tgl").value.trim(),
-        jamMulai: document.getElementById("in-jadwal-mulai").value.trim(),
-        jamSelesai: document.getElementById("in-jadwal-selesai").value.trim(),
+        jamMulai: jamMulai,
+        jamSelesai: jamSelesai,
         mapel: mapel,
-        token: document.getElementById("in-jadwal-token").value.trim(),
+        token: document.getElementById("in-jadwal-token").value.trim().toUpperCase(),
         kelas: kelas,
         status: document.getElementById("in-jadwal-status").value.trim(),
         linkForm: linkForm,
-        formId: formId
+        formId: formId,
+        updatedAt: new Date().toISOString()
       };
       if (!d.mapel || !d.token || !d.linkForm) { alert("Mata Pelajaran, Token, dan Link wajib diisi!"); return; }
       document.getElementById("btn-simpan-jadwal").innerText = "Menyimpan...";
-      if (editState.mode && editState.id1 && editState.id1 !== newDocId) {
-        await db.collection("master_ujian").doc(editState.id1).delete();
-      }
-      await db.collection("master_ujian").doc(newDocId).set(d);
-      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Jadwal Ujian: " + d.mapel);
+      await db.collection("master_ujian").doc(targetDocId).set(d, { merge: true });
+      await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Jadwal Ujian: " + d.mapel + " (" + d.kelas + ")");
       document.getElementById("btn-simpan-jadwal").innerText = "Simpan";
       tutupModal("modal-tambah-jadwal");
       await loadDataJadwal(true);
-      await refreshAdminStats(false);
+      await refreshAdminStats(true);
     }
 
     async function hapusJadwal(docId, mapel) {
@@ -1763,7 +2275,7 @@
         await db.collection("master_ujian").doc(docId).delete();
         await catatAktivitasAdmin("Menghapus Jadwal Ujian: " + mapel);
         await loadDataJadwal(true);
-        await refreshAdminStats(false);
+        await refreshAdminStats(true);
       }
     }
   </script>
