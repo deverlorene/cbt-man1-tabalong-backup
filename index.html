@@ -12,7 +12,7 @@
     <!-- Firebase SDK v10 Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="firebase-config.js?v=20261126v5"></script>
+    <script src="firebase-config.js?v=20261127sesi2"></script>
     <style>
       .anti-copas {
         -webkit-user-select: none;
@@ -120,7 +120,7 @@
         <p id="pesan-error-login" class="text-red-400 text-sm font-bold text-center mt-2 hidden"></p>
         <div class="backup-banner hidden text-xs text-amber-300 bg-amber-950/50 border border-amber-700/50 rounded-lg px-3 py-2 mt-4 text-center"></div>
         <div class="pt-3 border-t border-slate-700/70 flex items-center justify-between text-[11px] text-slate-400">
-          <span id="label-build-version">Server 2 • Sync Aktif</span>
+          <span id="label-build-version">Server Gabungan • Sync Aktif</span>
           <button type="button" onclick="segarkanCacheExamBro()" class="text-cyan-400 hover:text-cyan-300 font-semibold underline">
             <i class="fas fa-sync-alt mr-1"></i>Segarkan Cache
           </button>
@@ -269,7 +269,7 @@
 
     <script>
       var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
-      var KEY_BACKUP_QUEUE = "CBT_BACKUP_QUEUE_V1";
+      var KEY_BACKUP_QUEUE = "CBT_BACKUP_QUEUE_V2";
       var MAX_PELANGGARAN = 5;
       var KODE_BUKA_KUNCI_DARURAT = "man1katanya";
       var KODE_REMEDIAL_PANITIA = "man1katanya";
@@ -295,6 +295,7 @@
       var totalDetikUjian = 3600;
       var intervalTimerUjian = null;
       var unsubscribeLockListener = null;
+      var unsubscribeLockBackupListener = null;
       var unsubscribeJadwalListener = null;
 
       var ujianTertundaRemedial = null;
@@ -454,7 +455,6 @@
         var targetKelasRaw = String(ujian.kelas || "").trim().toUpperCase();
         var mapelRaw = String(ujian.mapel || "").trim().toUpperCase();
 
-        // 1. Cek jenjang pada judul Mapel jika mencantumkan Kelas X / XI / XII
         if (jenjangSiswa && /\bKELAS\b/.test(mapelRaw)) {
           var matchMapelKelas = mapelRaw.match(/\bKELAS\s+(XII|XI|X)\b/);
           if (matchMapelKelas && matchMapelKelas[1] && matchMapelKelas[1] !== jenjangSiswa) {
@@ -462,17 +462,14 @@
           }
         }
 
-        // 2. Jika kolom kelas kosong atau umum, loloskan
         if (!targetKelasRaw || targetKelasRaw === "SEMUA KELAS" || targetKelasRaw === "SEMUA" || targetKelasRaw === "ALL") {
           return true;
         }
 
-        // 3. Jika hanya tertulis jenjang saja (misal: "KELAS X" atau "X")
         if (jenjangSiswa && (targetKelasRaw === "KELAS " + jenjangSiswa || targetKelasRaw === jenjangSiswa)) {
           return true;
         }
 
-        // 4. Penguraian Rombel Gabungan: "KELAS X (A, B, C)" -> ["X A", "X B", "X C"]
         var daftarRombelTarget = [];
         var matchGrup = targetKelasRaw.match(/KELAS\s+(XII|XI|X)\s*\(([^)]+)\)/);
         if (matchGrup) {
@@ -528,7 +525,7 @@
         var jamStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
         var payloadAbsen = {
           tipe: "absensi",
-          source: "github_firestore_" + (tahap || "auto"),
+          source: "gabung_firestore_" + (tahap || "auto"),
           tanggal: todayStr,
           waktuLogin: now.toISOString(),
           jamLogin: jamStr,
@@ -541,14 +538,13 @@
           catatan: "-"
         };
 
-        var absenRef = db.collection("log_absensi").doc(getAbsensiDocId(dataUserAktif.nisn));
+        var absDocId = getAbsensiDocId(dataUserAktif.nisn);
         try {
-          var existingAbsen = await absenRef.get();
-          if (!existingAbsen.exists) {
-            await absenRef.set(payloadAbsen);
-          } else {
+          var existingAbsen = await getDocWithBackup("log_absensi", absDocId);
+          var finalPayload = payloadAbsen;
+          if (existingAbsen.exists) {
             var d = existingAbsen.data() || {};
-            var patch = {
+            finalPayload = {
               tanggal: todayStr,
               jamLogin: d.jamLogin || jamStr,
               waktuLogin: d.waktuLogin || now.toISOString(),
@@ -557,10 +553,15 @@
               kelas: d.kelas || dataUserAktif.kelas || "-",
               ruang: d.ruang || dataUserAktif.ruang || "-"
             };
-            if (mapelAktif) patch.mapel = mapelAktif;
-            await absenRef.set(patch, { merge: true });
+            if (mapelAktif) finalPayload.mapel = mapelAktif;
           }
-          localStorage.setItem(cacheAbsenKey, "1");
+
+          var resWrite = await setDocWithBackup("log_absensi", absDocId, finalPayload, { merge: true });
+          if (resWrite.ok) {
+            localStorage.setItem(cacheAbsenKey, "1");
+          } else {
+            throw new Error("Gagal menulis absensi ke server utama & cadangan");
+          }
         } catch (errFirestoreAbsen) {
           var backupIdAbsen = "ABSEN_" + todayStr + "_" + sanitizeId(dataUserAktif.nisn);
           masukAntreanBackup({ id: backupIdAbsen, payload: payloadAbsen });
@@ -629,7 +630,7 @@
         var docIdHariIni = getTodayStr() + "_" + sanitizeId(nisn) + "_" + sanitizeId(mapel);
 
         try {
-          var docToday = await db.collection("rekap_nilai").doc(docIdHariIni).get();
+          var docToday = await getDocWithBackup("rekap_nilai", docIdHariIni);
           if (docToday.exists) {
             var d1 = docToday.data() || {};
             var st1 = String(d1.status || "").trim();
@@ -640,26 +641,34 @@
           }
 
           var kandidatNisn = Array.from(new Set([String(nisn).trim(), nisnNormTarget].filter(Boolean)));
-          for (var i = 0; i < kandidatNisn.length; i++) {
-            var snapPrev = await db.collection("rekap_nilai")
-              .where("nisn", "==", kandidatNisn[i])
-              .get();
+          var sumberList = [db];
+          if (typeof dbBackup !== "undefined" && dbBackup) sumberList.push(dbBackup);
 
-            var ketemu = null;
-            snapPrev.forEach(function(doc) {
-              var d2 = doc.data() || {};
-              var m2Norm = normalisasiMapelKunci(d2.mapel);
-              var cocokMapel = (String(d2.mapel || "").trim() === String(mapel).trim()) ||
-                (mapelNormTarget && m2Norm === mapelNormTarget);
-              var st2 = String(d2.status || "").trim();
-              if (cocokMapel && (isStatusFinalValid(st2) || d2.nilaiAkhir !== undefined)) {
-                ketemu = st2 || "Selesai";
-              }
-            });
+          for (var sIdx = 0; sIdx < sumberList.length; sIdx++) {
+            var activeDb = sumberList[sIdx];
+            for (var i = 0; i < kandidatNisn.length; i++) {
+              try {
+                var snapPrev = await activeDb.collection("rekap_nilai")
+                  .where("nisn", "==", kandidatNisn[i])
+                  .get();
 
-            if (ketemu) {
-              tandaiSelesaiLokal(nisn, mapel, ketemu);
-              return { sudahSelesai: true, info: ketemu };
+                var ketemu = null;
+                snapPrev.forEach(function(doc) {
+                  var d2 = doc.data() || {};
+                  var m2Norm = normalisasiMapelKunci(d2.mapel);
+                  var cocokMapel = (String(d2.mapel || "").trim() === String(mapel).trim()) ||
+                    (mapelNormTarget && m2Norm === mapelNormTarget);
+                  var st2 = String(d2.status || "").trim();
+                  if (cocokMapel && (isStatusFinalValid(st2) || d2.nilaiAkhir !== undefined)) {
+                    ketemu = st2 || "Selesai";
+                  }
+                });
+
+                if (ketemu) {
+                  tandaiSelesaiLokal(nisn, mapel, ketemu);
+                  return { sudahSelesai: true, info: ketemu };
+                }
+              } catch (eInner) {}
             }
           }
         } catch (e) {}
@@ -780,6 +789,9 @@
 
         try {
           var snap = await db.collection("bank_soal").get();
+          if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            snap = await dbBackup.collection("bank_soal").get();
+          }
           var daftar = [];
           snap.forEach(function(doc) {
             var d = doc.data() || {};
@@ -833,11 +845,20 @@
         btn.innerText = "Mengambil Soal & Gambar...";
 
         try {
+          var activeBankDb = db;
           var metaDoc = await db.collection("bank_soal").doc(targetFormId).get();
+          if (!metaDoc.exists && typeof dbBackup !== "undefined" && dbBackup) {
+            var backupMeta = await dbBackup.collection("bank_soal").doc(targetFormId).get();
+            if (backupMeta.exists) {
+              metaDoc = backupMeta;
+              activeBankDb = dbBackup;
+            }
+          }
+
           var metaData = metaDoc.exists ? (metaDoc.data() || {}) : {};
           var namaMapel = metaData.mapel || ("Preview Form: " + targetFormId);
 
-          var chunksSnap = await db.collection("bank_soal").doc(targetFormId).collection("chunks").orderBy("chunkIndex").get();
+          var chunksSnap = await activeBankDb.collection("bank_soal").doc(targetFormId).collection("chunks").orderBy("chunkIndex").get();
           var dataSoalBaru = [];
           chunksSnap.forEach(function(doc) {
             var arr = JSON.parse(doc.data().itemsJson || "[]");
@@ -901,7 +922,7 @@
         perbaruiBannerBackup();
         var verEl = document.getElementById("label-build-version");
         if (verEl && typeof CBT_BUILD_VERSION !== "undefined") {
-          verEl.innerText = "Server 2 • " + CBT_BUILD_VERSION;
+          verEl.innerText = "Server Gabungan • " + CBT_BUILD_VERSION;
         }
 
         if (isPreviewMode) {
@@ -998,6 +1019,10 @@
           unsubscribeLockListener();
           unsubscribeLockListener = null;
         }
+        if (unsubscribeLockBackupListener) {
+          unsubscribeLockBackupListener();
+          unsubscribeLockBackupListener = null;
+        }
       }
 
       function lanjutkanSetelahBukaKunci(metodeBukaKunci) {
@@ -1040,6 +1065,14 @@
             lanjutkanSetelahBukaKunci("otomatis dari dashboard");
           }
         }, function() {});
+
+        if (typeof dbBackup !== "undefined" && dbBackup) {
+          unsubscribeLockBackupListener = dbBackup.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
+            if (doc.exists && doc.data().statusSesi === "AKTIF" && isTerkunci) {
+              lanjutkanSetelahBukaKunci("otomatis dari dashboard cadangan");
+            }
+          }, function() {});
+        }
       }
 
       async function verifikasiKodeManual() {
@@ -1062,18 +1095,16 @@
         errEl.classList.add("hidden");
         if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
           var docId = getAbsensiDocId(dataUserAktif.nisn);
-          try {
-            await db.collection("log_absensi").doc(docId).set({
-              tanggal: getTodayStr(),
-              nisn: String(dataUserAktif.nisn),
-              nama: dataUserAktif.nama || "-",
-              kelas: dataUserAktif.kelas || "-",
-              ruang: dataUserAktif.ruang || "-",
-              mapel: dataUserAktif.mapel || "-",
-              statusSesi: "AKTIF",
-              catatan: "Dibuka manual via kode darurat (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
-            }, { merge: true });
-          } catch (e) {}
+          await setDocWithBackup("log_absensi", docId, {
+            tanggal: getTodayStr(),
+            nisn: String(dataUserAktif.nisn),
+            nama: dataUserAktif.nama || "-",
+            kelas: dataUserAktif.kelas || "-",
+            ruang: dataUserAktif.ruang || "-",
+            mapel: dataUserAktif.mapel || "-",
+            statusSesi: "AKTIF",
+            catatan: "Dibuka manual via kode darurat (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
+          }, { merge: true });
         }
 
         lanjutkanSetelahBukaKunci("kode darurat manual");
@@ -1097,7 +1128,7 @@
 
           if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
             var docId = getAbsensiDocId(dataUserAktif.nisn);
-            db.collection("log_absensi").doc(docId).set({
+            setDocWithBackup("log_absensi", docId, {
               tanggal: getTodayStr(),
               nisn: String(dataUserAktif.nisn),
               nama: dataUserAktif.nama || "-",
@@ -1124,7 +1155,7 @@
 
         if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
           var absDocId = getAbsensiDocId(dataUserAktif.nisn);
-          db.collection("log_absensi").doc(absDocId).set({
+          setDocWithBackup("log_absensi", absDocId, {
             tanggal: getTodayStr(),
             nisn: String(dataUserAktif.nisn),
             nama: dataUserAktif.nama || "-",
@@ -1161,15 +1192,21 @@
         document.getElementById("btn-login").innerText = "Loading...";
 
         try {
-          var docRef = await db.collection("data_siswa").doc(sanitizeId(p)).get();
+          var docRef = await getDocWithBackup("data_siswa", sanitizeId(p));
           var found = null;
           if (docRef.exists && String(docRef.data().noPeserta).trim() === u) {
             found = docRef.data();
           } else {
-            var snap = await db.collection("data_siswa").where("noPeserta", "==", u).limit(5).get();
-            snap.forEach(function(d) {
-              if (String(d.data().nisn).trim() === p) found = d.data();
-            });
+            var sumberLogin = [db];
+            if (typeof dbBackup !== "undefined" && dbBackup) sumberLogin.push(dbBackup);
+            for (var s = 0; s < sumberLogin.length && !found; s++) {
+              try {
+                var snap = await sumberLogin[s].collection("data_siswa").where("noPeserta", "==", u).limit(5).get();
+                snap.forEach(function(d) {
+                  if (String(d.data().nisn).trim() === p) found = d.data();
+                });
+              } catch (eLoginDb) {}
+            }
           }
 
           document.getElementById("btn-login").innerText = "Login Peserta ➔";
@@ -1299,6 +1336,10 @@
 
         try {
           var snap = await db.collection("master_ujian").where("token", "==", t).get();
+          if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            snap = await dbBackup.collection("master_ujian").where("token", "==", t).get();
+          }
+
           if (snap.empty) {
             setErrorToken("Token Ujian salah atau tidak ditemukan!");
             return;
@@ -1311,7 +1352,6 @@
             semuaJadwalToken.push(item);
           });
 
-          // Saring jadwal yang cocok dengan kelas/rombel/jenjang siswa lalu urutkan dari yang paling spesifik
           var jadwalCocokSiswa = semuaJadwalToken
             .filter(function(j) {
               return isJadwalCocokDenganSiswa_(j, dataUserAktif);
@@ -1372,7 +1412,7 @@
               sisaDetik: sisaDetik
             };
             document.getElementById("teks-info-sudah-selesai").innerText =
-              "Anda sudah menyelesaikan ujian \"" + ujian.mapel + "\" (Status: " + statusRiwayat.info + "). Setiap siswa hanya bisa mengirimkan jawaban 1 kali. Untuk remedial, masukkan kode izin panitia di bawah ini:";
+              'Anda sudah menyelesaikan ujian "' + ujian.mapel + '" (Status: ' + statusRiwayat.info + '). Setiap siswa hanya bisa mengirimkan jawaban 1 kali. Untuk remedial, masukkan kode izin panitia di bawah ini:';
             document.getElementById("pesan-error-remedial").classList.add("hidden");
             boxRemedial.classList.remove("hidden");
             return;
@@ -1404,6 +1444,10 @@
           dataUserAktif.sisaDetik = paketUjian.sisaDetik;
 
           var chunksSnap = await db.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
+          if (chunksSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            chunksSnap = await dbBackup.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
+          }
+
           var dataSoalBaru = [];
           chunksSnap.forEach(function(doc) {
             var arr = JSON.parse(doc.data().itemsJson || "[]");
@@ -1496,7 +1540,7 @@
         tampilkanSoal(indeksSoalSekarang);
 
         try {
-          var doc = await db.collection("log_absensi").doc(getAbsensiDocId(dataUserAktif.nisn)).get();
+          var doc = await getDocWithBackup("log_absensi", getAbsensiDocId(dataUserAktif.nisn));
           if (doc.exists && doc.data().statusSesi === "TERKUNCI") {
             eksekusiPelanggaran("Mendeteksi status masih terkunci di server.");
           }
@@ -1776,7 +1820,7 @@
 
         var payloadRekap = {
           tipe: "rekap_nilai",
-          source: isIzinRemedialAktif ? "github_firestore_remedial" : "github_firestore_fallback",
+          source: isIzinRemedialAktif ? "gabung_firestore_remedial" : "gabung_firestore",
           waktuSelesai: now.toISOString(),
           waktuView: tglView,
           jamView: jamView,
@@ -1800,12 +1844,14 @@
         var backupIdRekap = "REKAP_" + getTodayStr() + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(dataUserAktif.mapel) + suffixRemedial;
         var tersimpanUtama = false;
         var tersimpanCadangan = false;
+        var targetFirestore = "none";
 
-        try {
-          var docId = getTodayStr() + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(dataUserAktif.mapel) + suffixRemedial;
-          await db.collection("rekap_nilai").doc(docId).set(payloadRekap);
+        var docId = getTodayStr() + "_" + sanitizeId(dataUserAktif.nisn) + "_" + sanitizeId(dataUserAktif.mapel) + suffixRemedial;
+        var resRekap = await setDocWithBackup("rekap_nilai", docId, payloadRekap);
+        if (resRekap.ok) {
           tersimpanUtama = true;
-        } catch (errFirestore) {
+          targetFirestore = resRekap.target;
+        } else {
           masukAntreanBackup({ id: backupIdRekap, payload: payloadRekap });
           tersimpanCadangan = await kirimKeWebAppBackup(payloadRekap);
           if (tersimpanCadangan) {
@@ -1820,7 +1866,7 @@
         }
 
         var ketSimpan = tersimpanUtama
-          ? "Jawaban berhasil terekam di server Firebase."
+          ? ("Jawaban berhasil terekam di server Firebase (" + targetFirestore + ").")
           : (tersimpanCadangan
             ? "Server/kuota utama sedang bermasalah; data dikirim ke server cadangan dan salinan lokal tetap dijaga. Tunjukkan layar ini ke pengawas sebelum keluar."
             : "Pengiriman ke server/cadangan tertunda. Nilai tetap tersimpan di perangkat ini—klik Kirim Ulang Sekarang atau lapor ke pengawas.");
