@@ -12,7 +12,7 @@
     <!-- Firebase SDK v10 Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="firebase-config.js?v=20261127sesi2"></script>
+    <script src="firebase-config.js?v=20261127sesi2v3"></script>
     <style>
       .anti-copas {
         -webkit-user-select: none;
@@ -297,6 +297,8 @@
       var unsubscribeLockListener = null;
       var unsubscribeLockBackupListener = null;
       var unsubscribeJadwalListener = null;
+      var lockTargetServer = "utama";
+      var lockTokenId = "";
 
       var ujianTertundaRemedial = null;
       var isIzinRemedialAktif = false;
@@ -1029,6 +1031,7 @@
         hentikanListenerKunci();
         hentikanListenerJadwal();
         isTerkunci = false;
+        lockTokenId = "";
         document.getElementById("modal-lock").classList.add("hidden");
         document.getElementById("input-kode-buka-kunci").value = "";
         document.getElementById("pesan-error-kode-manual").classList.add("hidden");
@@ -1055,24 +1058,31 @@
         document.getElementById("kt-sisa").innerText = Math.floor(totalDetikUjian / 60) + " Menit " + (totalDetikUjian % 60) + " Detik";
       }
 
-      function dengarkanBukaKunciRealtime() {
+      function dengarkanBukaKunciRealtime(expectedLockToken, targetServer) {
         hentikanListenerKunci();
         if (!dataUserAktif || !dataUserAktif.nisn) return;
         var docId = getAbsensiDocId(dataUserAktif.nisn);
+        var activeTargetDb = (targetServer === "cadangan" && typeof dbBackup !== "undefined" && dbBackup) ? dbBackup : db;
+        var labelSumber = (targetServer === "cadangan") ? "otomatis dari dashboard cadangan" : "otomatis dari dashboard";
+        var pernahTerbacaTerkunci = false;
 
-        unsubscribeLockListener = db.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
-          if (doc.exists && doc.data().statusSesi === "AKTIF" && isTerkunci) {
-            lanjutkanSetelahBukaKunci("otomatis dari dashboard");
+        unsubscribeLockListener = activeTargetDb.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
+          if (!doc.exists || !isTerkunci) return;
+          if (expectedLockToken && lockTokenId !== expectedLockToken) return;
+
+          var d = doc.data() || {};
+          // Pastikan dokumen benar-benar sudah memasuki status TERKUNCI untuk sesi kunci ini sebelum menerima status AKTIF
+          if (d.statusSesi === "TERKUNCI") {
+            if (!expectedLockToken || !d.lockToken || d.lockToken === expectedLockToken) {
+              pernahTerbacaTerkunci = true;
+            }
+            return;
+          }
+
+          if (d.statusSesi === "AKTIF" && pernahTerbacaTerkunci) {
+            lanjutkanSetelahBukaKunci(labelSumber);
           }
         }, function() {});
-
-        if (typeof dbBackup !== "undefined" && dbBackup) {
-          unsubscribeLockBackupListener = dbBackup.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
-            if (doc.exists && doc.data().statusSesi === "AKTIF" && isTerkunci) {
-              lanjutkanSetelahBukaKunci("otomatis dari dashboard cadangan");
-            }
-          }, function() {});
-        }
       }
 
       async function verifikasiKodeManual() {
@@ -1103,6 +1113,7 @@
             ruang: dataUserAktif.ruang || "-",
             mapel: dataUserAktif.mapel || "-",
             statusSesi: "AKTIF",
+            lockToken: "",
             catatan: "Dibuka manual via kode darurat (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
           }, { merge: true });
         }
@@ -1110,7 +1121,7 @@
         lanjutkanSetelahBukaKunci("kode darurat manual");
       }
 
-      function eksekusiPelanggaran(alasan) {
+      async function eksekusiPelanggaran(alasan) {
         if (isPreviewMode || isTerkunci) return;
         jumlahPelanggaran++;
         saveStateToLocal();
@@ -1119,6 +1130,7 @@
           hentikanListenerKunci();
           hentikanListenerJadwal();
           isTerkunci = false;
+          lockTokenId = "";
           statusUjianBerlangsung = false;
           if (intervalTimerUjian) clearInterval(intervalTimerUjian);
           if (timerSoalInterval) clearInterval(timerSoalInterval);
@@ -1136,6 +1148,7 @@
               ruang: dataUserAktif.ruang || "-",
               mapel: dataUserAktif.mapel || "-",
               statusSesi: "SELESAI_PAKSA",
+              lockToken: "",
               catatan: "Diskualifikasi (5x Pelanggaran): " + alasan
             }, { merge: true }).catch(function() {});
           }
@@ -1146,6 +1159,9 @@
         }
 
         isTerkunci = true;
+        var currentLockToken = "LOCK_" + Date.now() + "_" + jumlahPelanggaran;
+        lockTokenId = currentLockToken;
+
         document.getElementById("input-kode-buka-kunci").value = "";
         document.getElementById("pesan-error-kode-manual").classList.add("hidden");
         document.getElementById("pesan-lock-info").innerText = "Alasan: " + alasan;
@@ -1153,9 +1169,10 @@
           "⚠️ Pelanggaran ke-" + jumlahPelanggaran + " dari " + MAX_PELANGGARAN + ". Angkat tangan & lapor Pengawas.";
         document.getElementById("modal-lock").classList.remove("hidden");
 
+        var targetTulisLock = "utama";
         if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
           var absDocId = getAbsensiDocId(dataUserAktif.nisn);
-          setDocWithBackup("log_absensi", absDocId, {
+          var resLock = await setDocWithBackup("log_absensi", absDocId, {
             tanggal: getTodayStr(),
             nisn: String(dataUserAktif.nisn),
             nama: dataUserAktif.nama || "-",
@@ -1163,11 +1180,20 @@
             ruang: dataUserAktif.ruang || "-",
             mapel: dataUserAktif.mapel || "-",
             statusSesi: "TERKUNCI",
+            lockToken: currentLockToken,
             catatan: alasan + " (Pelanggaran " + jumlahPelanggaran + "/" + MAX_PELANGGARAN + ")"
-          }, { merge: true }).catch(function() {});
+          }, { merge: true });
+
+          if (resLock && resLock.ok && resLock.target) {
+            targetTulisLock = resLock.target;
+          }
         }
 
-        dengarkanBukaKunciRealtime();
+        lockTargetServer = targetTulisLock;
+        // Pasang listener hanya setelah status TERKUNCI selesai ditulis ke server yang bersangkutan
+        if (isTerkunci && lockTokenId === currentLockToken) {
+          dengarkanBukaKunciRealtime(currentLockToken, targetTulisLock);
+        }
       }
 
       function aktifkanLayarPenuh() {
