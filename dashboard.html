@@ -14,7 +14,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <!-- Mammoth.js untuk membaca & mengekstrak teks serta gambar dari file Word (.docx) langsung di browser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
-  <script src="firebase-config.js?v=20261127sesi2"></script>
+  <script src="firebase-config.js?v=20261127sesi2v3"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -1729,12 +1729,14 @@
         tampilList.forEach(function(d) {
           var tr = document.createElement("tr");
           tr.className = "hover:bg-slate-50";
-          var cNilai = d.nilai < 60 ? "text-red-500" : "text-emerald-600";
+          var hasNilai = (d.nilai !== undefined && d.nilai !== null && d.nilai !== "" && !isNaN(Number(d.nilai)));
+          var nilaiTampil = hasNilai ? Number(d.nilai) : "-";
+          var cNilai = !hasNilai ? "text-slate-400" : (Number(d.nilai) < 60 ? "text-red-500" : "text-emerald-600");
           var stLower = String(d.status || "").toLowerCase();
           var bStatus = (stLower.includes("diskualifikasi") || stLower.includes("pelanggaran"))
             ? "bg-red-100 text-red-700"
             : (stLower.includes("habis") ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700");
-          tr.innerHTML = `<td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.waktu)}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama || "-")}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn || "-")}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas || "-")}</td><td class="px-4 py-3">${escapeAttr(d.mapel || "-")}</td><td class="px-4 py-3 text-center font-black ${cNilai}">${escapeAttr(d.nilai || 0)}</td><td class="px-4 py-3 text-center"><span class="${bStatus} px-2 py-1 rounded text-xs font-bold whitespace-normal inline-block max-w-[150px] leading-tight">${escapeAttr(d.status || "-")}</span></td>`;
+          tr.innerHTML = `<td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.waktu)}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama || "-")}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn || "-")}</span></td><td class="px-4 py-3">${escapeAttr(d.kelas || "-")}</td><td class="px-4 py-3">${escapeAttr(d.mapel || "-")}</td><td class="px-4 py-3 text-center font-black ${cNilai}">${escapeAttr(nilaiTampil)}</td><td class="px-4 py-3 text-center"><span class="${bStatus} px-2 py-1 rounded text-xs font-bold whitespace-normal inline-block max-w-[150px] leading-tight">${escapeAttr(d.status || "-")}</span></td>`;
           frag.appendChild(tr);
         });
         tb.appendChild(frag);
