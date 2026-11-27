@@ -14,7 +14,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <!-- Mammoth.js untuk membaca & mengekstrak teks serta gambar dari file Word (.docx) langsung di browser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
-  <script src="firebase-config.js?v=20261126v4"></script>
+  <script src="firebase-config.js?v=20261127sesi2"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -82,7 +82,10 @@
           <h1 class="text-lg font-bold text-slate-800" id="topbar-title">Dashboard</h1>
           <p class="text-xs text-slate-500" id="topbar-subtitle">Memuat portal...</p>
         </div>
-        <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-3 text-sm flex-wrap">
+          <button id="btn-sync-cadangan" onclick="jalankanSyncCadanganKeUtama()" class="hidden text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors" title="Salin perubahan data terbaru dari server cadangan ke server utama">
+            <i class="fas fa-exchange-alt mr-1"></i> Sync Server Cadangan ➔ Utama
+          </button>
           <button onclick="sinkronUlangSemuaCache()" class="text-slate-600 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors" title="Ambil ulang data terbaru dari Firebase">
             <i class="fas fa-cloud-download-alt mr-1"></i> Sync Cache
           </button>
@@ -95,9 +98,12 @@
 
         <!-- [A] ADMIN: STATISTIK DASHBOARD UTAMA -->
         <div id="page-dashboard-admin" class="page-section space-y-6 hidden">
-          <div class="flex justify-between items-center">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <p class="text-xs text-slate-500" id="info-cache-stats">Data statistik dimuat dari cache lokal (hemat kuota Read).</p>
-            <button onclick="refreshAdminStats(true)" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold"><i class="fas fa-sync-alt mr-1"></i> Update Statistik</button>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="jalankanSyncCadanganKeUtama()" class="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm"><i class="fas fa-database mr-1"></i> Gabung & Sync Data Cadangan</button>
+              <button onclick="refreshAdminStats(true)" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold"><i class="fas fa-sync-alt mr-1"></i> Update Statistik</button>
+            </div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden"><div class="text-slate-500 text-sm mb-1">Total Siswa</div><div class="text-3xl font-black text-slate-800" id="stat-siswa">...</div><i class="fas fa-user-graduate absolute top-5 right-5 text-slate-200 text-xl"></i></div>
@@ -637,6 +643,49 @@
       }
     }
 
+    async function jalankanSyncCadanganKeUtama() {
+      if (typeof sinkronDataCadanganKeUtama !== "function") {
+        alert("Fungsi sinkronisasi server cadangan belum tersedia di firebase-config.js.");
+        return;
+      }
+      if (typeof dbBackup === "undefined" || !dbBackup) {
+        alert("Server cadangan (dbBackup) belum dikonfigurasi pada firebase-config.js.");
+        return;
+      }
+      if (!confirm("Salin dan gabungkan seluruh perubahan terbaru (siswa, guru, pengawas, jadwal, bank soal, absensi, dan rekap nilai) dari Server Cadangan ke Server Utama sekarang?")) {
+        return;
+      }
+
+      var btn = document.getElementById("btn-sync-cadangan");
+      var origHtml = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Menyinkronkan...';
+      }
+
+      try {
+        var total = await sinkronDataCadanganKeUtama(function(statusMsg) {
+          if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> ' + statusMsg;
+        });
+        clearMasterCache();
+        memCache.hasil = null;
+        memCache.logAktivitas = null;
+        dataRuangGlobal = [];
+        await catatAktivitasAdmin("Menyinkronkan & menggabungkan " + total + " dokumen dari server cadangan ke server utama");
+        alert("Sinkronisasi selesai! Sebanyak " + total + " dokumen berhasil digabungkan ke server utama.");
+        if (currentUser && currentUser.role === "admin") {
+          await refreshAdminStats(true);
+        }
+      } catch (err) {
+        alert("Gagal menyinkronkan data dari server cadangan: " + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+      }
+    }
+
     document.addEventListener("DOMContentLoaded", function() {
       var savedAdmin = localStorage.getItem("cbt_admin_session");
       if (savedAdmin) { currentUser = JSON.parse(savedAdmin); setupMenu(); }
@@ -690,12 +739,15 @@
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
 
       try {
-        var adm = await db.collection("data_admin").doc(safeSanitizeId(u)).get();
+        var adm = await getDocWithBackup("data_admin", safeSanitizeId(u));
         if (adm.exists && String(adm.data().password) === p) {
           currentUser = { status: "sukses", role: "admin", nama: adm.data().nama };
         }
         if (!currentUser) {
           var gSnap = await db.collection("data_guru").where("nip", "==", u).get();
+          if (gSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            gSnap = await dbBackup.collection("data_guru").where("nip", "==", u).get();
+          }
           gSnap.forEach(function(d) {
             if (String(d.data().password) === p) {
               currentUser = { status: "sukses", role: "guru", nama: d.data().nama, mapel: d.data().mapel };
@@ -703,7 +755,7 @@
           });
         }
         if (!currentUser) {
-          var png = await db.collection("data_pengawas").doc(safeSanitizeId(u)).get();
+          var png = await getDocWithBackup("data_pengawas", safeSanitizeId(u));
           if (png.exists && String(png.data().password) === p) {
             currentUser = { status: "sukses", role: "pengawas", nama: png.data().nama, ruang: png.data().ruang };
           }
@@ -739,6 +791,11 @@
       document.getElementById("avatar-inisial").innerText = currentUser.nama.charAt(0).toUpperCase();
 
       var mc = document.getElementById("menu-container");
+      var btnSyncCadangan = document.getElementById("btn-sync-cadangan");
+      if (btnSyncCadangan) {
+        btnSyncCadangan.classList.toggle("hidden", currentUser.role !== "admin");
+      }
+
       if (currentUser.role === "admin") {
         document.getElementById("sb-subtitle").innerText = "PORTAL ADMINISTRATOR";
         document.getElementById("topbar-subtitle").innerText = "Admin Utama • MAN 1 Tabalong";
@@ -833,6 +890,9 @@
         if (cached) return cached;
       }
       var snap = await db.collection(colName).get();
+      if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+        snap = await dbBackup.collection(colName).get();
+      }
       var list = [];
       snap.forEach(function(doc) {
         list.push({ _docId: doc.id, ...doc.data() });
@@ -1446,13 +1506,27 @@
     async function bukaKunci(nisn, btnElement) {
       btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuka...';
       btnElement.disabled = true;
+      var docId = safeTodayStr() + "_" + safeSanitizeId(nisn);
+      var patchData = { statusSesi: "AKTIF", catatan: "Dibuka otomatis via dashboard" };
+      var berhasil = false;
+
       try {
-        var docId = safeTodayStr() + "_" + safeSanitizeId(nisn);
-        await db.collection("log_absensi").doc(docId).update({ statusSesi: "AKTIF", catatan: "Dibuka otomatis via dashboard" });
+        await db.collection("log_absensi").doc(docId).set(patchData, { merge: true });
+        berhasil = true;
+      } catch (eUtama) {}
+
+      if (typeof dbBackup !== "undefined" && dbBackup) {
+        try {
+          await dbBackup.collection("log_absensi").doc(docId).set(patchData, { merge: true });
+          berhasil = true;
+        } catch (eCadangan) {}
+      }
+
+      if (berhasil) {
         await catatAktivitasAdmin("Membuka kunci ujian siswa NISN: " + nisn);
         await muatDataRuangUjian(true);
-      } catch (e) {
-        alert("Gagal membuka kunci (kemungkinan kuota/koneksi Firestore bermasalah, gunakan kode darurat di HP siswa): " + e.message);
+      } else {
+        alert("Gagal membuka kunci (kuota/koneksi Firestore utama & cadangan bermasalah, gunakan kode darurat di perangkat siswa).");
         btnElement.innerHTML = '<i class="fas fa-unlock"></i> Buka Kunci';
         btnElement.disabled = false;
       }
@@ -1507,7 +1581,27 @@
           });
         });
 
-        var gabungan = gabungkanRecordHasil(listFirestore, []);
+        var listCadangan = [];
+        if (typeof dbBackup !== "undefined" && dbBackup) {
+          try {
+            var snapBackup = await dbBackup.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(300).get();
+            snapBackup.forEach(function(doc) {
+              var d = doc.data();
+              listCadangan.push({
+                waktu: d.waktuView || d.tanggal || "-",
+                waktuSort: d.waktuSelesai || d.tanggal || "",
+                nisn: d.nisn,
+                nama: d.nama,
+                kelas: d.kelas,
+                mapel: d.mapel,
+                nilai: d.nilaiAkhir,
+                status: d.status || "Selesai"
+              });
+            });
+          } catch (eBackupRead) {}
+        }
+
+        var gabungan = gabungkanRecordHasil(listFirestore, listCadangan);
         gabungan.sort(function(a, b) {
           return String(b.waktuSort || b.waktu || "").localeCompare(String(a.waktuSort || a.waktu || ""));
         });
@@ -1516,7 +1610,7 @@
         dataHasilUjianGlobal = gabungan;
 
         if (infoSumber) {
-          infoSumber.innerText = "Menampilkan " + gabungan.length + " rekap unik terbaru dari Firestore (pilih Mapel untuk memuat mapel susulan/spesifik).";
+          infoSumber.innerText = "Menampilkan " + gabungan.length + " rekap unik terbaru gabungan dari Firestore utama & cadangan.";
         }
 
         isiFilterDanRenderHasil(jadwalList);
@@ -1773,6 +1867,9 @@
 
       try {
         var chunksSnap = await db.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
+        if (chunksSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+          chunksSnap = await dbBackup.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
+        }
         var allItems = [];
         chunksSnap.forEach(function(doc) {
           var arr = JSON.parse(doc.data().itemsJson || "[]");
@@ -2029,7 +2126,6 @@
       muatFormButirSoalEdit(editorSoalState.currentIndex);
     }
 
-    // Download Template Word (.doc yang dapat dibuka & disimpan sebagai .docx di Microsoft Word)
     function downloadTemplateWordDocx() {
       var mapelTitle = editorSoalState.mapel || "Mata Pelajaran";
       var templateHtml =
@@ -2074,7 +2170,6 @@
       URL.revokeObjectURL(url);
     }
 
-    // Kompres dataUrl gambar hasil ekstraksi Word agar tetap ringan untuk Firestore
     function compressExtractedDataUrl(dataUrl) {
       return new Promise(function(resolve) {
         if (!dataUrl || dataUrl.length < 120000) {
@@ -2104,7 +2199,6 @@
       });
     }
 
-    // Parser File Word (.docx) menggunakan Mammoth.js (mengekstrak teks soal, gambar, opsi A-E, dan KUNCI)
     async function handleImportWordDocx(event) {
       var file = event.target && event.target.files ? event.target.files[0] : null;
       if (!file) return;
@@ -2152,7 +2246,6 @@
 
           var rawText = (el.textContent || "").replace(/\u00a0/g, " ").trim();
 
-          // Cek apakah blok dimulai dengan nomor soal: "1. ..." atau "1) ..."
           var qMatch = rawText.match(/^(\d+)\s*[\.\)]\s*(.*)$/);
           if (qMatch) {
             await finalizeCurrentQuestion();
@@ -2179,7 +2272,6 @@
 
           if (!currentQ) continue;
 
-          // Cek apakah baris Kunci Jawaban: "KUNCI: A" atau "Jawaban: B"
           var kunciMatch = rawText.match(/^(?:KUNCI|JAWABAN|KUNCI\s+JAWABAN)\s*[:=\-]?\s*([A-E])\b/i);
           if (kunciMatch) {
             currentQ.kunci = kunciMatch[1].toUpperCase();
@@ -2187,7 +2279,6 @@
             continue;
           }
 
-          // Cek apakah baris Opsi A - E: "A. ..." atau "A) ..."
           var optMatch = rawText.match(/^([A-E])\s*[\.\)]\s*(.*)$/i);
           if (optMatch) {
             var letter = optMatch[1].toUpperCase();
@@ -2199,7 +2290,6 @@
             continue;
           }
 
-          // Lanjutan teks / gambar untuk opsi aktif atau pertanyaan aktif
           if (currentOptionKey) {
             if (rawText) {
               currentQ["opsi" + currentOptionKey] += (currentQ["opsi" + currentOptionKey] ? " " : "") + rawText;
@@ -2268,7 +2358,6 @@
           });
         });
 
-        // Bagi chunk secara dinamis berdasarkan ukuran byte JSON agar tidak pernah melampaui batas 1MB Firestore
         var chunksRef = db.collection("bank_soal").doc(formId).collection("chunks");
         var oldChunksSnap = await chunksRef.get();
         var batch = db.batch();
