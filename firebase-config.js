@@ -1,9 +1,9 @@
 // =========================================================================
 // KONFIGURASI FIREBASE GANDA - CBT ASAS MAN 1 TABALONG (SERVER UTAMA + CADANGAN)
-// Utama: cbt-man1-tabalong-2 | Cadangan: cbt-man1-tabalong
+// Utama: cbt-man1-tabalong | Cadangan: cbt-man1-tabalong-2
 // =========================================================================
 
-const CBT_BUILD_VERSION = "sesi2_gabung_server_2026_11_27_v2";
+const CBT_BUILD_VERSION = "sesi2_utama_fb1_2026_11_27_v3";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
 
 (function autoCleanStaleServerCache() {
@@ -44,24 +44,24 @@ const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
   }
 })();
 
-// 1. Project Firebase UTAMA (cbt-man1-tabalong-2)
+// 1. Project Firebase UTAMA (cbt-man1-tabalong)
 const firebaseConfigUtama = {
-  apiKey: "AIzaSyBr358_xp8niT5hdaG_Y9uaLg_dZSCrgqo",
-  authDomain: "cbt-man1-tabalong-2.firebaseapp.com",
-  projectId: "cbt-man1-tabalong-2",
-  storageBucket: "cbt-man1-tabalong-2.firebasestorage.app",
-  messagingSenderId: "601426183735",
-  appId: "1:601426183735:web:ea6840d95592b34125a1b2"
-};
-
-// 2. Project Firebase CADANGAN / BACKUP (cbt-man1-tabalong)
-const firebaseConfigCadangan = {
   apiKey: "AIzaSyBiK7v2PLgFeSC_FSi-iN3EL7mTh3bOZHc",
   authDomain: "cbt-man1-tabalong.firebaseapp.com",
   projectId: "cbt-man1-tabalong",
   storageBucket: "cbt-man1-tabalong.firebasestorage.app",
   messagingSenderId: "150623087457",
   appId: "1:150623087457:web:69936beda7f09bdd1b7320"
+};
+
+// 2. Project Firebase CADANGAN / BACKUP (cbt-man1-tabalong-2)
+const firebaseConfigCadangan = {
+  apiKey: "AIzaSyBr358_xp8niT5hdaG_Y9uaLg_dZSCrgqo",
+  authDomain: "cbt-man1-tabalong-2.firebaseapp.com",
+  projectId: "cbt-man1-tabalong-2",
+  storageBucket: "cbt-man1-tabalong-2.firebasestorage.app",
+  messagingSenderId: "601426183735",
+  appId: "1:601426183735:web:ea6840d95592b34125a1b2"
 };
 
 let utamaApp = null;
@@ -166,8 +166,7 @@ async function getDocWithBackup(koleksi, docId) {
 }
 
 /**
- * Menyalin data perubahan beberapa hari terakhir dari `dbBackup` (cbt-man1-tabalong)
- * ke `db` utama (cbt-man1-tabalong-2).
+ * Menyalin data dari `dbBackup` ke `db` utama.
  */
 async function sinkronDataCadanganKeUtama(onProgress) {
   if (!dbBackup) {
@@ -199,7 +198,6 @@ async function sinkronDataCadanganKeUtama(onProgress) {
     }
   }
 
-  // Salin bank_soal beserta subkoleksi chunks-nya
   if (typeof onProgress === "function") onProgress("Menyinkronkan bank_soal & chunks...");
   const bankSnap = await dbBackup.collection("bank_soal").get();
   for (const bankDoc of bankSnap.docs) {
@@ -224,7 +222,6 @@ async function sinkronDataCadanganKeUtama(onProgress) {
     }
   }
 
-  // Salin rekap_nilai & log_absensi terbaru (maksimal 500 dokumen per koleksi agar hemat kuota)
   const koleksiTransaksi = ["rekap_nilai", "log_absensi"];
   for (let j = 0; j < koleksiTransaksi.length; j++) {
     const tCol = koleksiTransaksi[j];
@@ -250,10 +247,6 @@ async function sinkronDataCadanganKeUtama(onProgress) {
   return totalTersalin;
 }
 
-/**
- * Memproses & mengompres gambar secara lokal (< 0.1 detik, tanpa network hang).
- * Gambar kecil <= 90 KB langsung dipakai instan; gambar besar otomatis dikompres ke max 800px WebP/JPEG.
- */
 function compressImageFile(file, maxWidth, maxHeight, quality) {
   const wMax = maxWidth || 800;
   const hMax = maxHeight || 800;
@@ -316,10 +309,6 @@ function compressImageFile(file, maxWidth, maxHeight, quality) {
   });
 }
 
-/**
- * Langsung memproses gambar secara instan di browser (0 network request saat pilih foto).
- * Data gambar disimpan bersama paket soal saat klik 'Simpan Semua Perubahan Soal'.
- */
 async function uploadSoalImage(file) {
   const compressed = await compressImageFile(file, 800, 800, 0.72);
   return compressed.dataUrl;
