@@ -1,9 +1,9 @@
 // =========================================================================
-// KONFIGURASI FIREBASE - CBT ASAS MAN 1 TABALONG (SERVER 2)
-// Upgraded v5: Anti-Cache ExamBro v5, Sinkronisasi Waktu & Fast Local Image
+// KONFIGURASI FIREBASE GANDA - CBT ASAS MAN 1 TABALONG (SERVER UTAMA + CADANGAN)
+// Utama: cbt-man1-tabalong-2 | Cadangan: cbt-man1-tabalong
 // =========================================================================
 
-const CBT_BUILD_VERSION = "github_fb2_2026_11_26_v5";
+const CBT_BUILD_VERSION = "sesi2_gabung_server_2026_11_27_v2";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
 
 (function autoCleanStaleServerCache() {
@@ -17,6 +17,8 @@ const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
         if (
           k.startsWith("CBT_STAFF_CACHE_") ||
           k.startsWith("CBT_ABSEN_OK_") ||
+          k.startsWith("CBT_DONE_") ||
+          k.startsWith("CBT_") ||
           k === "cbt_siswa_session" ||
           k === "cbt_admin_session"
         ) {
@@ -42,7 +44,8 @@ const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
   }
 })();
 
-const firebaseConfig = {
+// 1. Project Firebase UTAMA (cbt-man1-tabalong-2)
+const firebaseConfigUtama = {
   apiKey: "AIzaSyBr358_xp8niT5hdaG_Y9uaLg_dZSCrgqo",
   authDomain: "cbt-man1-tabalong-2.firebaseapp.com",
   projectId: "cbt-man1-tabalong-2",
@@ -51,11 +54,40 @@ const firebaseConfig = {
   appId: "1:601426183735:web:ea6840d95592b34125a1b2"
 };
 
-// Inisialisasi Firebase & Firestore (Compat v10)
+// 2. Project Firebase CADANGAN / BACKUP (cbt-man1-tabalong)
+const firebaseConfigCadangan = {
+  apiKey: "AIzaSyBiK7v2PLgFeSC_FSi-iN3EL7mTh3bOZHc",
+  authDomain: "cbt-man1-tabalong.firebaseapp.com",
+  projectId: "cbt-man1-tabalong",
+  storageBucket: "cbt-man1-tabalong.firebasestorage.app",
+  messagingSenderId: "150623087457",
+  appId: "1:150623087457:web:69936beda7f09bdd1b7320"
+};
+
+let utamaApp = null;
 if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+  utamaApp = firebase.initializeApp(firebaseConfigUtama);
+} else {
+  utamaApp = firebase.app();
 }
-const db = firebase.firestore();
+const db = utamaApp.firestore();
+
+let dbBackup = null;
+try {
+  if (
+    firebaseConfigCadangan.projectId &&
+    firebaseConfigCadangan.projectId !== firebaseConfigUtama.projectId
+  ) {
+    const existingBackup = firebase.apps.find(function (app) {
+      return app.name === "CBT_CADANGAN_APP";
+    });
+    const backupApp = existingBackup || firebase.initializeApp(firebaseConfigCadangan, "CBT_CADANGAN_APP");
+    dbBackup = backupApp.firestore();
+  }
+} catch (errBackupInit) {
+  console.warn("Firestore cadangan tidak aktif:", errBackupInit);
+  dbBackup = null;
+}
 
 function getTodayStr() {
   const d = new Date();
@@ -92,6 +124,130 @@ function parseJadwalDateTime(tanggalStr, jamStr, isEnd) {
   const sec = isEnd ? 59 : 0;
   const dt = new Date(yyyy, mm, dd, hh, min, sec);
   return isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Menulis dokumen ke Firestore utama (`db`), dan jika gagal (kuota/jaringan),
+ * otomatis mencoba menulis ke Firestore cadangan (`dbBackup`).
+ */
+async function setDocWithBackup(koleksi, docId, payload, options) {
+  try {
+    await db.collection(koleksi).doc(docId).set(payload, options || {});
+    return { ok: true, target: "utama" };
+  } catch (errUtama) {
+    if (dbBackup) {
+      try {
+        await dbBackup.collection(koleksi).doc(docId).set(payload, options || {});
+        return { ok: true, target: "cadangan" };
+      } catch (errCadangan) {
+        return { ok: false, target: "none", error: errCadangan };
+      }
+    }
+    return { ok: false, target: "none", error: errUtama };
+  }
+}
+
+/**
+ * Mengambil dokumen dari Firestore utama (`db`), lalu fallback ke `dbBackup` jika tidak ada/error.
+ */
+async function getDocWithBackup(koleksi, docId) {
+  try {
+    const docUtama = await db.collection(koleksi).doc(docId).get();
+    if (docUtama.exists) return docUtama;
+  } catch (e) {}
+
+  if (dbBackup) {
+    try {
+      const docCadangan = await dbBackup.collection(koleksi).doc(docId).get();
+      if (docCadangan.exists) return docCadangan;
+    } catch (e2) {}
+  }
+  return { exists: false, data: function () { return null; } };
+}
+
+/**
+ * Menyalin data perubahan beberapa hari terakhir dari `dbBackup` (cbt-man1-tabalong)
+ * ke `db` utama (cbt-man1-tabalong-2).
+ */
+async function sinkronDataCadanganKeUtama(onProgress) {
+  if (!dbBackup) {
+    throw new Error("Firestore cadangan belum aktif.");
+  }
+
+  const koleksiMaster = ["data_siswa", "data_guru", "data_pengawas", "data_admin", "master_ujian"];
+  let totalTersalin = 0;
+
+  for (let i = 0; i < koleksiMaster.length; i++) {
+    const colName = koleksiMaster[i];
+    if (typeof onProgress === "function") onProgress("Menyinkronkan " + colName + "...");
+    const snap = await dbBackup.collection(colName).get();
+    let batch = db.batch();
+    let opCount = 0;
+
+    for (const doc of snap.docs) {
+      batch.set(db.collection(colName).doc(doc.id), doc.data(), { merge: true });
+      opCount++;
+      totalTersalin++;
+      if (opCount >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        opCount = 0;
+      }
+    }
+    if (opCount > 0) {
+      await batch.commit();
+    }
+  }
+
+  // Salin bank_soal beserta subkoleksi chunks-nya
+  if (typeof onProgress === "function") onProgress("Menyinkronkan bank_soal & chunks...");
+  const bankSnap = await dbBackup.collection("bank_soal").get();
+  for (const bankDoc of bankSnap.docs) {
+    await db.collection("bank_soal").doc(bankDoc.id).set(bankDoc.data(), { merge: true });
+    totalTersalin++;
+
+    const chunksSnap = await dbBackup.collection("bank_soal").doc(bankDoc.id).collection("chunks").get();
+    let cBatch = db.batch();
+    let cCount = 0;
+    for (const chDoc of chunksSnap.docs) {
+      cBatch.set(db.collection("bank_soal").doc(bankDoc.id).collection("chunks").doc(chDoc.id), chDoc.data(), { merge: true });
+      cCount++;
+      totalTersalin++;
+      if (cCount >= 400) {
+        await cBatch.commit();
+        cBatch = db.batch();
+        cCount = 0;
+      }
+    }
+    if (cCount > 0) {
+      await cBatch.commit();
+    }
+  }
+
+  // Salin rekap_nilai & log_absensi terbaru (maksimal 500 dokumen per koleksi agar hemat kuota)
+  const koleksiTransaksi = ["rekap_nilai", "log_absensi"];
+  for (let j = 0; j < koleksiTransaksi.length; j++) {
+    const tCol = koleksiTransaksi[j];
+    if (typeof onProgress === "function") onProgress("Menyinkronkan " + tCol + "...");
+    const tSnap = await dbBackup.collection(tCol).limit(500).get();
+    let tBatch = db.batch();
+    let tCount = 0;
+    for (const tDoc of tSnap.docs) {
+      tBatch.set(db.collection(tCol).doc(tDoc.id), tDoc.data(), { merge: true });
+      tCount++;
+      totalTersalin++;
+      if (tCount >= 400) {
+        await tBatch.commit();
+        tBatch = db.batch();
+        tCount = 0;
+      }
+    }
+    if (tCount > 0) {
+      await tBatch.commit();
+    }
+  }
+
+  return totalTersalin;
 }
 
 /**
