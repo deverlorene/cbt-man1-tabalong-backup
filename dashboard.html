@@ -942,7 +942,7 @@
       else if (pageId === "page-jadwal-ujian") loadDataJadwal(true);
       else if (pageId === "page-guru") loadGuruStats(false);
       else if (pageId === "page-pengawas") loadDataLogPengawas(false);
-      else if (pageId === "page-hasil-ujian") loadHasilUjianAdmin(false);
+      else if (pageId === "page-hasil-ujian") loadHasilUjianAdmin(true);
       else if (pageId === "page-log-aktivitas") loadDataLogAktivitas(false);
     }
 
@@ -1283,13 +1283,11 @@
           });
         }
 
-        if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
-          dataHasilUjianGlobal.forEach(tambahRekapItem_);
-        }
+        // Muat ulang rekap_nilai terbaru dari activeDb & dbBackup agar siswa yang sudah selesai (seperti Akbar) selalu terdeteksi
 
-        var promisesRekapRuang = [activeDb.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get()];
+        var promisesRekapRuang = [activeDb.collection("rekap_nilai").limit(800).get()];
         if (typeof dbBackup !== "undefined" && dbBackup) {
-          promisesRekapRuang.push(dbBackup.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(300).get());
+          promisesRekapRuang.push(dbBackup.collection("rekap_nilai").limit(500).get());
         }
         var snapsRuang = await Promise.all(promisesRekapRuang);
         snapsRuang.forEach(function(sn) {
@@ -1727,12 +1725,26 @@
       function masuk(item) {
         if (!item) return;
         var nisnKey = normNisnStr(item.nisn);
-        var mapelKey = String(item.mapel || "").trim().toLowerCase().replace(/\s*-\s*/g, " ").replace(/\s+/g, " ");
-        var k = (nisnKey || String(item.nama || "").trim().toUpperCase()) + "|" + mapelKey;
+        var namaKey = String(item.nama || "").trim().toLowerCase().replace(/\s+/g, " ");
+        var mapelKey = String(item.mapel || "").trim().toLowerCase().replace(/[-–—]/g, " ").replace(/\bkelas\b.*$/i, "").replace(/\s+/g, " ").trim();
+        var idUtama = nisnKey || namaKey;
+        if (!idUtama && !mapelKey) return;
+        var k = idUtama + "|" + mapelKey;
         var prev = mapUnik.get(k);
-        if (!prev || String(item.waktuSort || "") > String(prev.waktuSort || "") || Number(item.nilai || 0) > Number(prev.nilai || 0)) {
+        if (!prev) {
           mapUnik.set(k, item);
+          return;
         }
+        var prevNilai = (prev.nilai !== "" && prev.nilai !== undefined && prev.nilai !== null && !isNaN(Number(prev.nilai))) ? Number(prev.nilai) : -1;
+        var currNilai = (item.nilai !== "" && item.nilai !== undefined && item.nilai !== null && !isNaN(Number(item.nilai))) ? Number(item.nilai) : -1;
+        var merged = Object.assign({}, prev, item);
+        if (prevNilai > currNilai) {
+          merged.nilai = prev.nilai;
+        }
+        if (!merged.nama || merged.nama === "-") merged.nama = prev.nama || item.nama || "-";
+        if (!merged.kelas || merged.kelas === "-") merged.kelas = prev.kelas || item.kelas || "-";
+        if (!merged.mapel || merged.mapel === "-") merged.mapel = prev.mapel || item.mapel || "-";
+        mapUnik.set(k, merged);
       }
       (listUtama || []).forEach(masuk);
       (listTambahan || []).forEach(masuk);
@@ -1752,53 +1764,57 @@
 
       try {
         var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
-        var [snap, jadwalList] = await Promise.all([
-          readCtx.dbInstance.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get(),
-          getMasterCollectionCached("master_ujian", "jadwal", false)
+        var [snap, jadwalList, siswaMasterList] = await Promise.all([
+          readCtx.dbInstance.collection("rekap_nilai").limit(800).get(),
+          getMasterCollectionCached("master_ujian", "jadwal", false),
+          getMasterCollectionCached("data_siswa", "siswa", false)
         ]);
+
+        var mapSiswaByNisn = {};
+        (siswaMasterList || []).forEach(function(s) {
+          var nk = normNisnStr(s.nisn);
+          if (nk && !mapSiswaByNisn[nk]) {
+            mapSiswaByNisn[nk] = s;
+          }
+        });
+
+        function petakanDokRekap_(doc, asalServer) {
+          var d = doc.data() || {};
+          var nk = normNisnStr(d.nisn);
+          var refSiswa = nk ? (mapSiswaByNisn[nk] || null) : null;
+          var nilaiFix = (d.nilaiAkhir !== undefined && d.nilaiAkhir !== null && d.nilaiAkhir !== "")
+            ? d.nilaiAkhir
+            : ((d.nilai !== undefined && d.nilai !== null && d.nilai !== "") ? d.nilai : "");
+          var wSort = d.waktuSelesai || d.waktuSort || d.updatedAt || d.tanggal || "";
+          return {
+            waktu: d.waktuView || d.jamView || d.tanggal || "-",
+            waktuSort: String(wSort),
+            tanggal: d.tanggal || safeTodayStr(),
+            nisn: d.nisn || (refSiswa ? refSiswa.nisn : ""),
+            noPeserta: d.noPeserta || (refSiswa ? refSiswa.noPeserta : ""),
+            nama: d.nama || d.namaSiswa || (refSiswa ? refSiswa.nama : "-"),
+            kelas: d.kelas || d.kelasSiswa || (refSiswa ? refSiswa.kelas : "-"),
+            angkatan: d.angkatan || (refSiswa ? ekstrakAngkatanSiswa(refSiswa) : ""),
+            mapel: d.mapel || d.mataPelajaran || "-",
+            nilai: nilaiFix,
+            jumlahPelanggaran: d.jumlahPelanggaran || 0,
+            status: d.status || (nilaiFix !== "" ? "Selesai" : "-"),
+            serverAsal: asalServer
+          };
+        }
 
         var listFirestore = [];
         snap.forEach(function(doc) {
-          var d = doc.data();
-          listFirestore.push({
-            waktu: d.waktuView || d.tanggal || "-",
-            waktuSort: d.waktuSelesai || d.tanggal || "",
-            tanggal: d.tanggal || safeTodayStr(),
-            nisn: d.nisn,
-            noPeserta: d.noPeserta || "",
-            nama: d.nama,
-            kelas: d.kelas,
-            angkatan: d.angkatan || "",
-            mapel: d.mapel,
-            nilai: d.nilaiAkhir,
-            jumlahPelanggaran: d.jumlahPelanggaran || 0,
-            status: d.status || "Selesai",
-            serverAsal: readCtx.serverName || "utama"
-          });
+          listFirestore.push(petakanDokRekap_(doc, readCtx.serverName || "utama"));
         });
 
         var listCadangan = [];
         if (typeof dbBackup !== "undefined" && dbBackup) {
           try {
             if (typeof catatOperasiKuota_ === "function") catatOperasiKuota_("cadangan", "read", 1);
-            var snapBackup = await dbBackup.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(300).get();
+            var snapBackup = await dbBackup.collection("rekap_nilai").limit(500).get();
             snapBackup.forEach(function(doc) {
-              var d = doc.data();
-              listCadangan.push({
-                waktu: d.waktuView || d.tanggal || "-",
-                waktuSort: d.waktuSelesai || d.tanggal || "",
-                tanggal: d.tanggal || safeTodayStr(),
-                nisn: d.nisn,
-                noPeserta: d.noPeserta || "",
-                nama: d.nama,
-                kelas: d.kelas,
-                angkatan: d.angkatan || "",
-                mapel: d.mapel,
-                nilai: d.nilaiAkhir,
-                jumlahPelanggaran: d.jumlahPelanggaran || 0,
-                status: d.status || "Selesai",
-                serverAsal: "cadangan"
-              });
+              listCadangan.push(petakanDokRekap_(doc, "cadangan"));
             });
           } catch (eBackupRead) {}
         }
