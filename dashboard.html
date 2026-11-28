@@ -14,7 +14,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <!-- Mammoth.js untuk membaca & mengekstrak teks serta gambar dari file Word (.docx) langsung di browser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
-  <script src="firebase-config.js?v=20261127sesi2v3"></script>
+  <script src="firebase-config.js?v=20261128v5"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -89,7 +89,7 @@
           <button onclick="sinkronUlangSemuaCache()" class="text-slate-600 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors" title="Ambil ulang data terbaru dari Firebase">
             <i class="fas fa-cloud-download-alt mr-1"></i> Sync Cache
           </button>
-          <span class="hidden sm:flex items-center gap-2 text-emerald-600 font-semibold bg-emerald-50 px-3 py-1 rounded-full text-xs"><i class="fas fa-shield-alt"></i> Mode Hemat Kuota</span>
+          <span class="hidden sm:flex items-center gap-2 text-emerald-600 font-semibold bg-emerald-50 px-3 py-1 rounded-full text-xs"><i class="fas fa-shield-alt"></i> Mode Hemat Kuota (45K)</span>
           <button onclick="logoutStaff()" class="text-slate-500 hover:text-red-500 font-bold transition-colors"><i class="fas fa-sign-out-alt mr-1"></i> Logout</button>
         </div>
       </div>
@@ -227,7 +227,10 @@
         <div id="page-jadwal-ujian" class="page-section hidden space-y-6">
           <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-              <h2 class="text-xl font-bold text-slate-800">Jadwal Ujian Terjadwal</h2>
+              <div>
+                <h2 class="text-xl font-bold text-slate-800">Jadwal Ujian Terjadwal</h2>
+                <p class="text-xs text-slate-500 mt-1">Otomatis disaring agar tidak menampilkan jadwal/soal ganda dengan link GForm atau mapel+kelas yang sama (dipilih data ter-update).</p>
+              </div>
               <div class="flex gap-2 w-full md:w-auto flex-wrap">
                 <input type="text" id="search-jadwal" onkeyup="cariTabel('search-jadwal', 'tb-jadwal-ujian')" placeholder="Cari mapel/token..." class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
                 <button onclick="loadDataJadwal(true)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded text-sm font-bold"><i class="fas fa-sync-alt"></i></button>
@@ -249,9 +252,9 @@
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
               <div>
                 <h2 class="text-xl font-bold text-slate-800">Hasil Ujian & Analisis Pusat</h2>
-                <p class="text-xs text-slate-500 mt-1" id="info-hasil-sumber">Memuat gabungan data dari Firebase & Spreadsheet Rekap (termasuk data susulan).</p>
+                <p class="text-xs text-slate-500 mt-1" id="info-hasil-sumber">Memuat gabungan data dari Firebase 1 & Firebase 2 serta menyinkronkan ke Spreadsheet V2.</p>
               </div>
-              <div class="flex gap-2 w-full md:w-auto overflow-x-auto">
+              <div class="flex gap-2 w-full md:w-auto overflow-x-auto flex-wrap">
                 <input type="text" id="search-hasil" onkeyup="cariTabel('search-hasil', 'tb-hasil-ujian-admin')" placeholder="Cari nama/NISN..." class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
                 <select id="filter-kelas" onchange="currentPageHasil = 1; renderTabelHasilAdmin()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Kelas</option></select>
                 <select id="filter-mapel" onchange="currentPageHasil = 1; muatHasilPerMapelTerpilih()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"><option value="Semua">Semua Mapel</option></select>
@@ -263,6 +266,7 @@
                   <option value="nama_asc">Urut: Nama (A - Z)</option>
                   <option value="nama_desc">Urut: Nama (Z - A)</option>
                 </select>
+                <button onclick="kirimSemuaRekapKeSpreadsheetV2()" id="btn-push-spv2" class="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap" title="Kirim semua rekap Firebase 1 & 2 ke Spreadsheet V2"><i class="fas fa-table mr-1"></i> Push ke Spreadsheet V2</button>
                 <button onclick="loadHasilUjianAdmin(true)" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap" title="Refresh Hasil Ujian"><i class="fas fa-sync-alt"></i></button>
                 <button onclick="unduhCSVHasilAdmin()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-file-excel"></i> Export CSV</button>
               </div>
@@ -547,7 +551,9 @@
   </div>
 
   <script>
-    var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
+    var URL_WEB_APP_BACKUP = (typeof URL_SPREADSHEET_V2 !== "undefined" && URL_SPREADSHEET_V2)
+      ? URL_SPREADSHEET_V2
+      : "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
 
     var currentUser = null;
     var editState = { mode: false, type: '', id1: '', id2: '' };
@@ -558,7 +564,6 @@
     var currentPageHasil = 1;
     var currentPageRuang = 1;
 
-    // State Fitur Edit Soal + Foto + Word
     var editorSoalState = {
       formId: "",
       mapel: "",
@@ -598,6 +603,55 @@
         .replace(/"/g, "&quot;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
+    }
+
+    function ekstrakFormIdDariLink(val) {
+      var raw = String(val || "").trim();
+      if (!raw) return "";
+      var matchUrl = raw.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      return (matchUrl && matchUrl[1]) ? matchUrl[1] : raw;
+    }
+
+    function normalisasiKunciJadwal(j) {
+      var fId = ekstrakFormIdDariLink(j.formId || j.linkForm || "");
+      var mapelNorm = String(j.mapel || "").trim().toLowerCase().replace(/\s+/g, " ");
+      var kelasNorm = String(j.kelas || "").trim().toLowerCase().replace(/\s+/g, " ");
+      if (fId) return "FORM:" + fId + "|KLS:" + kelasNorm;
+      return "MAPEL:" + mapelNorm + "|KLS:" + kelasNorm;
+    }
+
+    function skorWaktuUpdateJadwal(j) {
+      var ts = String(j.updatedAt || "").trim();
+      if (ts) {
+        var parsed = Date.parse(ts);
+        if (!isNaN(parsed)) return parsed;
+      }
+      var tgl = String(j.tanggal || "").trim();
+      var jam = String(j.jamMulai || "00:00").trim();
+      var dt = Date.parse(tgl + "T" + (jam.length === 5 ? jam + ":00" : jam));
+      return isNaN(dt) ? 0 : dt;
+    }
+
+    function deduplikasiJadwalTerupdate(list) {
+      var mapUnik = new Map();
+      (list || []).forEach(function(item) {
+        if (!item) return;
+        var key = normalisasiKunciJadwal(item);
+        var prev = mapUnik.get(key);
+        if (!prev) {
+          mapUnik.set(key, item);
+          return;
+        }
+        var prevHasForm = !!ekstrakFormIdDariLink(prev.formId || prev.linkForm || "");
+        var currHasForm = !!ekstrakFormIdDariLink(item.formId || item.linkForm || "");
+        var skorPrev = skorWaktuUpdateJadwal(prev);
+        var skorCurr = skorWaktuUpdateJadwal(item);
+
+        if (skorCurr > skorPrev || (skorCurr === skorPrev && currHasForm && !prevHasForm)) {
+          mapUnik.set(key, item);
+        }
+      });
+      return Array.from(mapUnik.values());
     }
 
     function getCacheKey(name) {
@@ -720,7 +774,8 @@
       var now = new Date();
       var wkt = String(now.getDate()).padStart(2, "0") + "/" + String(now.getMonth() + 1).padStart(2, "0") + "/" + now.getFullYear() + " " + String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") + ":" + String(now.getSeconds()).padStart(2, "0");
       try {
-        await db.collection("log_aktivitas").add({
+        var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+        await writeCtx.dbInstance.collection("log_aktivitas").add({
           waktu: now.toISOString(),
           waktuView: wkt,
           admin: currentUser ? currentUser.nama : "System",
@@ -744,7 +799,8 @@
           currentUser = { status: "sukses", role: "admin", nama: adm.data().nama };
         }
         if (!currentUser) {
-          var gSnap = await db.collection("data_guru").where("nip", "==", u).get();
+          var readCtxG = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+          var gSnap = await readCtxG.dbInstance.collection("data_guru").where("nip", "==", u).get();
           if (gSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
             gSnap = await dbBackup.collection("data_guru").where("nip", "==", u).get();
           }
@@ -889,14 +945,19 @@
         var cached = readStorageCache(cacheKey);
         if (cached) return cached;
       }
-      var snap = await db.collection(colName).get();
+      var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+      var snap = await readCtx.dbInstance.collection(colName).get();
       if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+        if (typeof catatOperasiKuota_ === "function") catatOperasiKuota_("cadangan", "read", 1);
         snap = await dbBackup.collection(colName).get();
       }
       var list = [];
       snap.forEach(function(doc) {
         list.push({ _docId: doc.id, ...doc.data() });
       });
+      if (colName === "master_ujian") {
+        list = deduplikasiJadwalTerupdate(list);
+      }
       writeStorageCache(cacheKey, list);
       return list;
     }
@@ -921,9 +982,12 @@
       document.getElementById("stat-jadwal").innerText = s4.length;
 
       if (infoEl) {
+        var statusQuota = (typeof isUtamaSudahMencapaiBatas45k === "function" && isUtamaSudahMencapaiBatas45k())
+          ? " • Auto-switch ke Server Cadangan (>=45K kuota)"
+          : "";
         infoEl.innerText = (!forceRefresh && hasCachedSiswa && hasCachedGuru && hasCachedPengawas && hasCachedJadwal)
-          ? "Statistik diambil dari cache lokal (0 Read baru)."
-          : "Statistik diperbarui dari Firestore.";
+          ? ("Statistik diambil dari cache lokal (0 Read baru)" + statusQuota + ".")
+          : ("Statistik diperbarui dari Firestore (jadwal ter-deduplikasi)" + statusQuota + ".");
       }
     }
 
@@ -934,7 +998,8 @@
         return;
       }
       tb.innerHTML = '<tr><td colspan="3" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Memuat...</td></tr>';
-      var snap = await db.collection("log_aktivitas").orderBy("waktu", "desc").limit(50).get();
+      var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+      var snap = await readCtx.dbInstance.collection("log_aktivitas").orderBy("waktu", "desc").limit(50).get();
       var list = [];
       snap.forEach(function(doc) { list.push(doc.data()); });
       memCache.logAktivitas = list;
@@ -1065,10 +1130,12 @@
 
       try {
         var jadwalList = await getMasterCollectionCached("master_ujian", "jadwal", true);
+        var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+        var activeDb = readCtx.dbInstance;
 
         var siswaList = [];
         if (isPengawas) {
-          var pSiswaSnap = await db.collection("data_siswa").where("ruang", "==", currentUser.ruang).get();
+          var pSiswaSnap = await activeDb.collection("data_siswa").where("ruang", "==", currentUser.ruang).get();
           pSiswaSnap.forEach(function(doc) { siswaList.push(doc.data()); });
         } else {
           siswaList = await getMasterCollectionCached("data_siswa", "siswa", false);
@@ -1148,7 +1215,7 @@
         var tglQuery = (jadwalAktif && jadwalAktif.tanggal) ? String(jadwalAktif.tanggal).trim() : safeTodayStr();
         var mapelSesiList = (sesiTarget && sesiTarget !== "Semua") ? (mapMapelListByKey[sesiTarget] || []) : [];
 
-        var absenQuery = db.collection("log_absensi").where("tanggal", "==", tglQuery);
+        var absenQuery = activeDb.collection("log_absensi").where("tanggal", "==", tglQuery);
         if (isPengawas) {
           absenQuery = absenQuery.where("ruang", "==", currentUser.ruang);
         } else if (ruangTarget && ruangTarget !== "Semua") {
@@ -1159,9 +1226,9 @@
         if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
           listRekapAll = dataHasilUjianGlobal;
         } else {
-          var promisesRekapRuang = [db.collection("rekap_nilai").where("tanggal", "==", tglQuery).get()];
+          var promisesRekapRuang = [activeDb.collection("rekap_nilai").where("tanggal", "==", tglQuery).get()];
           if (mapelSesiList.length > 0 && mapelSesiList.length <= 10) {
-            promisesRekapRuang.push(db.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get());
+            promisesRekapRuang.push(activeDb.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get());
           }
           var snapsRuang = await Promise.all(promisesRekapRuang);
           var seenDocIds = {};
@@ -1507,7 +1574,7 @@
       btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuka...';
       btnElement.disabled = true;
       var docId = safeTodayStr() + "_" + safeSanitizeId(nisn);
-      var patchData = { statusSesi: "AKTIF", catatan: "Dibuka otomatis via dashboard" };
+      var patchData = { statusSesi: "AKTIF", lockToken: "", catatan: "Dibuka otomatis via dashboard" };
       var berhasil = false;
 
       try {
@@ -1540,7 +1607,7 @@
         var mapelKey = String(item.mapel || "").trim().toLowerCase().replace(/\s*-\s*/g, " ").replace(/\s+/g, " ");
         var k = (nisnKey || String(item.nama || "").trim().toUpperCase()) + "|" + mapelKey;
         var prev = mapUnik.get(k);
-        if (!prev || Number(item.nilai || 0) > Number(prev.nilai || 0)) {
+        if (!prev || String(item.waktuSort || "") > String(prev.waktuSort || "") || Number(item.nilai || 0) > Number(prev.nilai || 0)) {
           mapUnik.set(k, item);
         }
       }
@@ -1558,11 +1625,12 @@
         return;
       }
 
-      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik rekap nilai secara bertahap (hemat kuota & anti-hang)...</td></tr>';
+      tb.innerHTML = '<tr><td colspan="6" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik rekap nilai dari Firebase 1 & Firebase 2...</td></tr>';
 
       try {
+        var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
         var [snap, jadwalList] = await Promise.all([
-          db.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get(),
+          readCtx.dbInstance.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get(),
           getMasterCollectionCached("master_ujian", "jadwal", false)
         ]);
 
@@ -1572,30 +1640,41 @@
           listFirestore.push({
             waktu: d.waktuView || d.tanggal || "-",
             waktuSort: d.waktuSelesai || d.tanggal || "",
+            tanggal: d.tanggal || safeTodayStr(),
             nisn: d.nisn,
+            noPeserta: d.noPeserta || "",
             nama: d.nama,
             kelas: d.kelas,
+            angkatan: d.angkatan || "",
             mapel: d.mapel,
             nilai: d.nilaiAkhir,
-            status: d.status || "Selesai"
+            jumlahPelanggaran: d.jumlahPelanggaran || 0,
+            status: d.status || "Selesai",
+            serverAsal: readCtx.serverName || "utama"
           });
         });
 
         var listCadangan = [];
         if (typeof dbBackup !== "undefined" && dbBackup) {
           try {
+            if (typeof catatOperasiKuota_ === "function") catatOperasiKuota_("cadangan", "read", 1);
             var snapBackup = await dbBackup.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(300).get();
             snapBackup.forEach(function(doc) {
               var d = doc.data();
               listCadangan.push({
                 waktu: d.waktuView || d.tanggal || "-",
                 waktuSort: d.waktuSelesai || d.tanggal || "",
+                tanggal: d.tanggal || safeTodayStr(),
                 nisn: d.nisn,
+                noPeserta: d.noPeserta || "",
                 nama: d.nama,
                 kelas: d.kelas,
+                angkatan: d.angkatan || "",
                 mapel: d.mapel,
                 nilai: d.nilaiAkhir,
-                status: d.status || "Selesai"
+                jumlahPelanggaran: d.jumlahPelanggaran || 0,
+                status: d.status || "Selesai",
+                serverAsal: "cadangan"
               });
             });
           } catch (eBackupRead) {}
@@ -1609,8 +1688,36 @@
         memCache.hasil = gabungan;
         dataHasilUjianGlobal = gabungan;
 
+        // Kirim otomatis rekap dari Firebase 1 & 2 ke Spreadsheet V2 (dibatasi per sesi cache agar hemat)
+        if (typeof kirimRekapKeSpreadsheetV2 === "function" && gabungan.length > 0) {
+          var syncKeySpV2 = "CBT_SPV2_SYNCED_" + safeTodayStr() + "_" + gabungan.length;
+          if (!sessionStorage.getItem(syncKeySpV2)) {
+            sessionStorage.setItem(syncKeySpV2, "1");
+            for (var k = 0; k < Math.min(gabungan.length, 100); k++) {
+              var rec = gabungan[k];
+              kirimRekapKeSpreadsheetV2({
+                tipe: "rekap_nilai",
+                source: "dashboard_sync_v2",
+                serverAsal: rec.serverAsal || "gabung",
+                waktuSelesai: rec.waktuSort || new Date().toISOString(),
+                waktuView: rec.waktu || "-",
+                tanggal: rec.tanggal || safeTodayStr(),
+                nisn: rec.nisn || "",
+                noPeserta: rec.noPeserta || "",
+                nama: rec.nama || "-",
+                kelas: rec.kelas || "-",
+                angkatan: rec.angkatan || "",
+                mapel: rec.mapel || "-",
+                nilaiAkhir: rec.nilai !== undefined ? rec.nilai : 0,
+                jumlahPelanggaran: rec.jumlahPelanggaran || 0,
+                status: rec.status || "Selesai"
+              }).catch(function() {});
+            }
+          }
+        }
+
         if (infoSumber) {
-          infoSumber.innerText = "Menampilkan " + gabungan.length + " rekap unik terbaru gabungan dari Firestore utama & cadangan.";
+          infoSumber.innerText = "Menampilkan " + gabungan.length + " rekap unik terbaru gabungan dari Firebase 1 & Firebase 2 (tersambung ke Spreadsheet V2).";
         }
 
         isiFilterDanRenderHasil(jadwalList);
@@ -1619,25 +1726,78 @@
       }
     }
 
+    async function kirimSemuaRekapKeSpreadsheetV2() {
+      if (!Array.isArray(dataHasilUjianGlobal) || dataHasilUjianGlobal.length === 0) {
+        await loadHasilUjianAdmin(true);
+      }
+      if (!dataHasilUjianGlobal || dataHasilUjianGlobal.length === 0) {
+        alert("Tidak ada data rekap untuk dikirim ke Spreadsheet V2.");
+        return;
+      }
+      if (typeof kirimRekapKeSpreadsheetV2 !== "function") {
+        alert("Fungsi kirimRekapKeSpreadsheetV2 belum tersedia.");
+        return;
+      }
+      var btn = document.getElementById("btn-push-spv2");
+      var orig = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Mengirim...';
+      }
+      var suksesCount = 0;
+      for (var i = 0; i < dataHasilUjianGlobal.length; i++) {
+        var rec = dataHasilUjianGlobal[i];
+        var ok = await kirimRekapKeSpreadsheetV2({
+          tipe: "rekap_nilai",
+          source: "manual_push_v2",
+          serverAsal: rec.serverAsal || "gabung",
+          waktuSelesai: rec.waktuSort || new Date().toISOString(),
+          waktuView: rec.waktu || "-",
+          tanggal: rec.tanggal || safeTodayStr(),
+          nisn: rec.nisn || "",
+          noPeserta: rec.noPeserta || "",
+          nama: rec.nama || "-",
+          kelas: rec.kelas || "-",
+          angkatan: rec.angkatan || "",
+          mapel: rec.mapel || "-",
+          nilaiAkhir: rec.nilai !== undefined ? rec.nilai : 0,
+          jumlahPelanggaran: rec.jumlahPelanggaran || 0,
+          status: rec.status || "Selesai"
+        });
+        if (ok) suksesCount++;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+      alert("Proses pengiriman ke Spreadsheet V2 selesai (" + suksesCount + " data diproses).");
+    }
+
     async function muatHasilPerMapelTerpilih() {
       var fMapel = document.getElementById("filter-mapel").value;
       if (fMapel && fMapel !== "Semua") {
         var sudahAdaMapel = dataHasilUjianGlobal.some(function(x) { return x.mapel === fMapel; });
         if (!sudahAdaMapel) {
           try {
-            var snapM = await db.collection("rekap_nilai").where("mapel", "==", fMapel).get();
+            var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+            var snapM = await readCtx.dbInstance.collection("rekap_nilai").where("mapel", "==", fMapel).get();
             var tambahan = [];
             snapM.forEach(function(doc) {
               var d = doc.data();
               tambahan.push({
                 waktu: d.waktuView || d.tanggal || "-",
                 waktuSort: d.waktuSelesai || d.tanggal || "",
+                tanggal: d.tanggal || safeTodayStr(),
                 nisn: d.nisn,
+                noPeserta: d.noPeserta || "",
                 nama: d.nama,
                 kelas: d.kelas,
+                angkatan: d.angkatan || "",
                 mapel: d.mapel,
                 nilai: d.nilaiAkhir,
-                status: d.status || "Selesai"
+                jumlahPelanggaran: d.jumlahPelanggaran || 0,
+                status: d.status || "Selesai",
+                serverAsal: readCtx.serverName || "utama"
               });
             });
             dataHasilUjianGlobal = gabungkanRecordHasil(dataHasilUjianGlobal, tambahan);
@@ -1771,7 +1931,8 @@
     }
 
     async function loadGuruStats(forceRefresh) {
-      var snap = await db.collection("rekap_nilai").where("mapel", "==", currentUser.mapel).get();
+      var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+      var snap = await readCtx.dbInstance.collection("rekap_nilai").where("mapel", "==", currentUser.mapel).get();
       var hasil = [], total = 0, max = 0, min = 100, peserta = 0;
       snap.forEach(function(doc) {
         var r = doc.data();
@@ -1804,9 +1965,6 @@
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
-    // =========================================================================
-    // FITUR EDIT SOAL + UPLOAD FOTO INSTAN + IMPORT WORD (.DOCX) + TEMPLATE
-    // =========================================================================
     async function bukaEditSoalGuru(event) {
       var btn = event && event.currentTarget ? event.currentTarget : null;
       var orig = btn ? btn.innerHTML : "";
@@ -1844,9 +2002,7 @@
     }
 
     async function bukaEditorSoalPaket(formId, mapel, linkForm) {
-      var cleanFormId = String(formId || "").trim();
-      var matchUrl = cleanFormId.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (matchUrl && matchUrl[1]) cleanFormId = matchUrl[1];
+      var cleanFormId = ekstrakFormIdDariLink(formId || linkForm || "");
 
       if (!cleanFormId) {
         alert("Form ID tidak valid.");
@@ -1864,12 +2020,38 @@
         linkEl.classList.add("hidden");
       }
 
-      document.getElementById("status-simpan-soal").innerText = "Mengambil butir soal & gambar dari koleksi bank_soal...";
+      document.getElementById("status-simpan-soal").innerText = "Mengambil butir soal ter-update dari koleksi bank_soal...";
       document.getElementById("modal-edit-soal").classList.remove("hidden");
 
       try {
-        var chunksSnap = await db.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
-        if (chunksSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+        var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+        var activeBankDb = readCtx.dbInstance;
+        var metaUtama = await activeBankDb.collection("bank_soal").doc(cleanFormId).get();
+        var metaCadangan = (typeof dbBackup !== "undefined" && dbBackup)
+          ? await dbBackup.collection("bank_soal").doc(cleanFormId).get()
+          : { exists: false, data: function() { return null; } };
+
+        var metaData = {};
+        if (metaUtama.exists && metaCadangan.exists) {
+          var dU = metaUtama.data() || {};
+          var dC = metaCadangan.data() || {};
+          if (skorWaktuUpdateJadwal(dC) > skorWaktuUpdateJadwal(dU)) {
+            metaData = dC;
+            activeBankDb = dbBackup;
+          } else {
+            metaData = dU;
+            activeBankDb = readCtx.dbInstance;
+          }
+        } else if (metaUtama.exists) {
+          metaData = metaUtama.data() || {};
+          activeBankDb = readCtx.dbInstance;
+        } else if (metaCadangan.exists) {
+          metaData = metaCadangan.data() || {};
+          activeBankDb = dbBackup;
+        }
+
+        var chunksSnap = await activeBankDb.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
+        if (chunksSnap.empty && typeof dbBackup !== "undefined" && dbBackup && activeBankDb !== dbBackup) {
           chunksSnap = await dbBackup.collection("bank_soal").doc(cleanFormId).collection("chunks").orderBy("chunkIndex").get();
         }
         var allItems = [];
@@ -1912,7 +2094,7 @@
 
         editorSoalState = {
           formId: cleanFormId,
-          mapel: mapel || "Ujian",
+          mapel: metaData.mapel || mapel || "Ujian",
           linkForm: linkForm || "",
           items: allItems,
           currentIndex: 0
@@ -1920,7 +2102,7 @@
 
         renderDropdownSoalEdit();
         muatFormButirSoalEdit(0);
-        document.getElementById("status-simpan-soal").innerText = "Siap diedit (" + allItems.length + " soal dimuat).";
+        document.getElementById("status-simpan-soal").innerText = "Siap diedit (" + allItems.length + " soal dimuat, versi ter-update).";
       } catch (e) {
         document.getElementById("status-simpan-soal").innerText = "Gagal memuat soal: " + e.message;
       }
@@ -2360,9 +2542,11 @@
           });
         });
 
-        var chunksRef = db.collection("bank_soal").doc(formId).collection("chunks");
+        var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+        var activeWriteDb = writeCtx.dbInstance;
+        var chunksRef = activeWriteDb.collection("bank_soal").doc(formId).collection("chunks");
         var oldChunksSnap = await chunksRef.get();
-        var batch = db.batch();
+        var batch = activeWriteDb.batch();
         oldChunksSnap.forEach(function(doc) {
           batch.delete(doc.ref);
         });
@@ -2394,7 +2578,7 @@
           });
         }
 
-        batch.set(db.collection("bank_soal").doc(formId), {
+        batch.set(activeWriteDb.collection("bank_soal").doc(formId), {
           mapel: editorSoalState.mapel,
           formId: formId,
           totalSoal: itemsClean.length,
@@ -2418,7 +2602,8 @@
     async function loadDataLogPengawas(forceRefresh) {
       var tb = document.getElementById("tb-pengawas-log");
       tb.innerHTML = '<tr><td colspan="4" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Menarik data...</td></tr>';
-      var snap = await db.collection("rekap_nilai").where("tanggal", "==", safeTodayStr()).get();
+      var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+      var snap = await readCtx.dbInstance.collection("rekap_nilai").where("tanggal", "==", safeTodayStr()).get();
       tb.innerHTML = "";
       if (snap.empty) { tb.innerHTML = '<tr><td colspan="4" class="text-center py-4">Belum ada ujian selesai hari ini.</td></tr>'; return; }
       var logs = [];
@@ -2456,12 +2641,13 @@
       var d = { nisn: document.getElementById("in-nisn").value.trim(), noPeserta: document.getElementById("in-nopes").value.trim(), nama: document.getElementById("in-nama").value.trim(), kelas: document.getElementById("in-kelas").value.trim(), angkatan: document.getElementById("in-angkatan").value.trim(), ruang: document.getElementById("in-ruang").value.trim(), password: document.getElementById("in-pass").value.trim() };
       if (!d.nisn || !d.nama || !d.password) { alert("Wajib isi NISN, Nama, dan Password"); return; }
       document.getElementById("btn-simpan-siswa").innerText = "Loading...";
-      if (editState.mode && editState.id1 !== d.nisn) await db.collection("data_siswa").doc(safeSanitizeId(editState.id1)).delete();
-      await db.collection("data_siswa").doc(safeSanitizeId(d.nisn)).set(d);
+      var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+      if (editState.mode && editState.id1 !== d.nisn) await writeCtx.dbInstance.collection("data_siswa").doc(safeSanitizeId(editState.id1)).delete();
+      await writeCtx.dbInstance.collection("data_siswa").doc(safeSanitizeId(d.nisn)).set(d);
       await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Siswa: " + d.nama);
       document.getElementById("btn-simpan-siswa").innerText = "Simpan"; tutupModal("modal-tambah-siswa"); await loadDataSiswa(true);
     }
-    async function hapusSiswa(nisn) { if (confirm("Hapus siswa NISN " + nisn + "?")) { await db.collection("data_siswa").doc(safeSanitizeId(nisn)).delete(); await catatAktivitasAdmin("Menghapus Siswa NISN: " + nisn); await loadDataSiswa(true); } }
+    async function hapusSiswa(nisn) { if (confirm("Hapus siswa NISN " + nisn + "?")) { var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db }; await writeCtx.dbInstance.collection("data_siswa").doc(safeSanitizeId(nisn)).delete(); await catatAktivitasAdmin("Menghapus Siswa NISN: " + nisn); await loadDataSiswa(true); } }
 
     async function loadDataGuru(forceRefresh) {
       var tb = document.getElementById("tb-data-guru");
@@ -2489,12 +2675,13 @@
       var d = { nip: document.getElementById("in-guru-nip").value.trim(), nama: document.getElementById("in-guru-nama").value.trim(), mapel: document.getElementById("in-guru-mapel").value.trim(), password: document.getElementById("in-guru-pass").value.trim() };
       if (!d.nip || !d.mapel || !d.password) { alert("Wajib diisi lengkap!"); return; }
       document.getElementById("btn-simpan-guru").innerText = "Loading...";
-      if (editState.mode) await db.collection("data_guru").doc(safeSanitizeId(editState.id1 + "_" + editState.id2)).delete();
-      await db.collection("data_guru").doc(safeSanitizeId(d.nip + "_" + d.mapel)).set(d);
+      var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+      if (editState.mode) await writeCtx.dbInstance.collection("data_guru").doc(safeSanitizeId(editState.id1 + "_" + editState.id2)).delete();
+      await writeCtx.dbInstance.collection("data_guru").doc(safeSanitizeId(d.nip + "_" + d.mapel)).set(d);
       await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Guru: " + d.nama);
       document.getElementById("btn-simpan-guru").innerText = "Simpan"; tutupModal("modal-tambah-guru"); await loadDataGuru(true);
     }
-    async function hapusGuru(nip, mapel) { if (confirm("Hapus penugasan " + mapel + "?")) { await db.collection("data_guru").doc(safeSanitizeId(nip + "_" + mapel)).delete(); await catatAktivitasAdmin("Menghapus Guru NIP: " + nip); await loadDataGuru(true); } }
+    async function hapusGuru(nip, mapel) { if (confirm("Hapus penugasan " + mapel + "?")) { var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db }; await writeCtx.dbInstance.collection("data_guru").doc(safeSanitizeId(nip + "_" + mapel)).delete(); await catatAktivitasAdmin("Menghapus Guru NIP: " + nip); await loadDataGuru(true); } }
 
     async function loadDataPengawas(forceRefresh) {
       var tb = document.getElementById("tb-data-pengawas");
@@ -2522,12 +2709,13 @@
       var d = { user: document.getElementById("in-pengawas-user").value.trim(), nama: document.getElementById("in-pengawas-nama").value.trim(), ruang: document.getElementById("in-pengawas-ruang").value.trim(), password: document.getElementById("in-pengawas-pass").value.trim() };
       if (!d.user || !d.ruang || !d.password) { alert("Wajib diisi lengkap!"); return; }
       document.getElementById("btn-simpan-pengawas").innerText = "Loading...";
-      if (editState.mode && editState.id1 !== d.user) await db.collection("data_pengawas").doc(safeSanitizeId(editState.id1)).delete();
-      await db.collection("data_pengawas").doc(safeSanitizeId(d.user)).set(d);
+      var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+      if (editState.mode && editState.id1 !== d.user) await writeCtx.dbInstance.collection("data_pengawas").doc(safeSanitizeId(editState.id1)).delete();
+      await writeCtx.dbInstance.collection("data_pengawas").doc(safeSanitizeId(d.user)).set(d);
       await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Pengawas: " + d.user);
       document.getElementById("btn-simpan-pengawas").innerText = "Simpan"; tutupModal("modal-tambah-pengawas"); await loadDataPengawas(true);
     }
-    async function hapusPengawas(user) { if (confirm("Hapus pengawas " + user + "?")) { await db.collection("data_pengawas").doc(safeSanitizeId(user)).delete(); await catatAktivitasAdmin("Menghapus Pengawas: " + user); await loadDataPengawas(true); } }
+    async function hapusPengawas(user) { if (confirm("Hapus pengawas " + user + "?")) { var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db }; await writeCtx.dbInstance.collection("data_pengawas").doc(safeSanitizeId(user)).delete(); await catatAktivitasAdmin("Menghapus Pengawas: " + user); await loadDataPengawas(true); } }
 
     async function loadDataJadwal(forceRefresh) {
       var tb = document.getElementById("tb-jadwal-ujian");
@@ -2543,9 +2731,10 @@
     function renderTabelJadwal(list) {
       var tb = document.getElementById("tb-jadwal-ujian");
       tb.innerHTML = "";
-      if (!list || list.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Belum ada jadwal.</td></tr>'; return; }
+      var cleanList = deduplikasiJadwalTerupdate(list);
+      if (!cleanList || cleanList.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Belum ada jadwal.</td></tr>'; return; }
       var now = new Date();
-      list.forEach(function(j) {
+      cleanList.forEach(function(j) {
         var docId = j._docId || j.docId || "";
         var tglView = "Belum Diatur", statusWarna = "putih";
         if (j.tanggal) {
@@ -2587,8 +2776,7 @@
 
     async function simpanJadwal() {
       var linkForm = document.getElementById("in-jadwal-link").value.trim();
-      var m = linkForm.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      var formId = (m && m[1]) ? m[1] : "";
+      var formId = ekstrakFormIdDariLink(linkForm);
       var mapel = document.getElementById("in-jadwal-mapel").value.trim();
       var kelas = document.getElementById("in-jadwal-kelas").value.trim();
       var jamMulai = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(document.getElementById("in-jadwal-mulai").value) : document.getElementById("in-jadwal-mulai").value.trim();
@@ -2596,7 +2784,7 @@
 
       var targetDocId = (editState.mode && editState.id1)
         ? editState.id1
-        : safeSanitizeId((formId ? formId + "_" : "") + mapel + "_" + kelas + "_" + Date.now().toString().slice(-4));
+        : safeSanitizeId((formId ? formId + "_" : "") + mapel + "_" + kelas);
 
       var d = {
         docId: targetDocId,
@@ -2613,7 +2801,8 @@
       };
       if (!d.mapel || !d.token || !d.linkForm) { alert("Mata Pelajaran, Token, dan Link wajib diisi!"); return; }
       document.getElementById("btn-simpan-jadwal").innerText = "Menyimpan...";
-      await db.collection("master_ujian").doc(targetDocId).set(d, { merge: true });
+      var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+      await writeCtx.dbInstance.collection("master_ujian").doc(targetDocId).set(d, { merge: true });
       await catatAktivitasAdmin((editState.mode ? "Mengedit" : "Menambah") + " Jadwal Ujian: " + d.mapel + " (" + d.kelas + ")");
       document.getElementById("btn-simpan-jadwal").innerText = "Simpan";
       tutupModal("modal-tambah-jadwal");
@@ -2623,7 +2812,8 @@
 
     async function hapusJadwal(docId, mapel) {
       if (confirm("Hapus Master Ujian mapel: " + mapel + "?")) {
-        await db.collection("master_ujian").doc(docId).delete();
+        var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+        await writeCtx.dbInstance.collection("master_ujian").doc(docId).delete();
         await catatAktivitasAdmin("Menghapus Jadwal Ujian: " + mapel);
         await loadDataJadwal(true);
         await refreshAdminStats(true);
