@@ -12,7 +12,7 @@
     <!-- Firebase SDK v10 Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="firebase-config.js?v=20261127sesi2v3"></script>
+    <script src="firebase-config.js?v=20261128v5"></script>
     <style>
       .anti-copas {
         -webkit-user-select: none;
@@ -268,7 +268,9 @@
     </div>
 
     <script>
-      var URL_WEB_APP_BACKUP = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
+      var URL_WEB_APP_BACKUP = (typeof URL_SPREADSHEET_V2 !== "undefined" && URL_SPREADSHEET_V2)
+        ? URL_SPREADSHEET_V2
+        : "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
       var KEY_BACKUP_QUEUE = "CBT_BACKUP_QUEUE_V2";
       var MAX_PELANGGARAN = 5;
       var KODE_BUKA_KUNCI_DARURAT = "man1katanya";
@@ -295,10 +297,11 @@
       var totalDetikUjian = 3600;
       var intervalTimerUjian = null;
       var unsubscribeLockListener = null;
-      var unsubscribeLockBackupListener = null;
+      var unsubscribeLockSecondaryListener = null;
       var unsubscribeJadwalListener = null;
       var lockTargetServer = "utama";
       var lockTokenId = "";
+      var unlockGraceUntil = 0;
 
       var ujianTertundaRemedial = null;
       var isIzinRemedialAktif = false;
@@ -382,8 +385,9 @@
       function dengarkanPerubahanJadwalRealtime(jadwalDocId) {
         hentikanListenerJadwal();
         if (isPreviewMode || !jadwalDocId || typeof db === "undefined") return;
+        var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
 
-        unsubscribeJadwalListener = db.collection("master_ujian").doc(jadwalDocId).onSnapshot(function(doc) {
+        unsubscribeJadwalListener = readCtx.dbInstance.collection("master_ujian").doc(jadwalDocId).onSnapshot(function(doc) {
           if (!doc.exists || !statusUjianBerlangsung) return;
           var d = doc.data() || {};
           var evalNow = hitungSisaDetikDariJadwal_(d, new Date());
@@ -561,6 +565,9 @@
           var resWrite = await setDocWithBackup("log_absensi", absDocId, finalPayload, { merge: true });
           if (resWrite.ok) {
             localStorage.setItem(cacheAbsenKey, "1");
+            if (resWrite.target === "cadangan" && typeof kirimRekapKeSpreadsheetV2 === "function") {
+              kirimRekapKeSpreadsheetV2(Object.assign({}, payloadAbsen, { serverAsal: "firebase_cadangan" })).catch(function() {});
+            }
           } else {
             throw new Error("Gagal menulis absensi ke server utama & cadangan");
           }
@@ -643,13 +650,17 @@
           }
 
           var kandidatNisn = Array.from(new Set([String(nisn).trim(), nisnNormTarget].filter(Boolean)));
-          var sumberList = [db];
-          if (typeof dbBackup !== "undefined" && dbBackup) sumberList.push(dbBackup);
+          var sumberList = (typeof isUtamaSudahMencapaiBatas45k === "function" && isUtamaSudahMencapaiBatas45k("read") && typeof dbBackup !== "undefined" && dbBackup)
+            ? [dbBackup, db]
+            : ((typeof dbBackup !== "undefined" && dbBackup) ? [db, dbBackup] : [db]);
 
           for (var sIdx = 0; sIdx < sumberList.length; sIdx++) {
             var activeDb = sumberList[sIdx];
             for (var i = 0; i < kandidatNisn.length; i++) {
               try {
+                if (typeof catatOperasiKuota_ === "function") {
+                  catatOperasiKuota_(activeDb === dbBackup ? "cadangan" : "utama", "read", 1);
+                }
                 var snapPrev = await activeDb.collection("rekap_nilai")
                   .where("nisn", "==", kandidatNisn[i])
                   .get();
@@ -713,11 +724,12 @@
       }
 
       async function kirimKeWebAppBackup(payload) {
-        if (!URL_WEB_APP_BACKUP || URL_WEB_APP_BACKUP.indexOf("https://") !== 0) {
+        var targetEndpoint = URL_WEB_APP_BACKUP || (typeof URL_SPREADSHEET_V2 !== "undefined" ? URL_SPREADSHEET_V2 : "");
+        if (!targetEndpoint || targetEndpoint.indexOf("https://") !== 0) {
           return false;
         }
         try {
-          await fetch(URL_WEB_APP_BACKUP, {
+          await fetch(targetEndpoint, {
             method: "POST",
             mode: "no-cors",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -747,7 +759,7 @@
         }
 
         if (bacaAntreanBackup().length === 0) {
-          alert("Berhasil mengirim ulang " + terkirim + " data cadangan ke server backup.");
+          alert("Berhasil mengirim ulang " + terkirim + " data cadangan ke Spreadsheet V2 / backup.");
         } else {
           alert("Sebagian data (" + terkirim + ") terkirim. Masih ada antrean karena koneksi/server belum merespons.");
         }
@@ -790,7 +802,8 @@
         sel.innerHTML = '<option value="">Memuat daftar bank_soal dari Firestore...</option>';
 
         try {
-          var snap = await db.collection("bank_soal").get();
+          var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+          var snap = await readCtx.dbInstance.collection("bank_soal").get();
           if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
             snap = await dbBackup.collection("bank_soal").get();
           }
@@ -847,8 +860,9 @@
         btn.innerText = "Mengambil Soal & Gambar...";
 
         try {
-          var activeBankDb = db;
-          var metaDoc = await db.collection("bank_soal").doc(targetFormId).get();
+          var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+          var activeBankDb = readCtx.dbInstance;
+          var metaDoc = await activeBankDb.collection("bank_soal").doc(targetFormId).get();
           if (!metaDoc.exists && typeof dbBackup !== "undefined" && dbBackup) {
             var backupMeta = await dbBackup.collection("bank_soal").doc(targetFormId).get();
             if (backupMeta.exists) {
@@ -957,24 +971,24 @@
       });
       document.addEventListener("keydown", function(e) {
         if (isPreviewMode) return;
+        if (!statusUjianBerlangsung || isTerkunci || isSedangMengumpulkan) return;
         if (e.keyCode === 123) { e.preventDefault(); eksekusiPelanggaran("Mencoba membuka inspect element (F12)!"); }
         if (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) { e.preventDefault(); eksekusiPelanggaran("Mencoba membuka Developer Tools!"); }
         if (e.ctrlKey && e.key === "U") { e.preventDefault(); eksekusiPelanggaran("Mencoba melihat Source Code!"); }
         if (e.ctrlKey && e.key === "P") { e.preventDefault(); eksekusiPelanggaran("Mencoba Print soal ujian!"); }
         if (e.ctrlKey && (e.key === "C" || e.key === "c" || e.keyCode === 67)) {
-          if (statusUjianBerlangsung && !isTerkunci) {
-            e.preventDefault();
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText("").catch(function() {});
-            }
-            eksekusiPelanggaran("Mencoba menyalin (Copy) isi soal!");
+          e.preventDefault();
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText("").catch(function() {});
           }
+          eksekusiPelanggaran("Mencoba menyalin (Copy) isi soal!");
         }
       });
 
       window.addEventListener("keyup", function(e) {
         if (isPreviewMode) return;
-        if (statusUjianBerlangsung && !isTerkunci && (e.key === "PrintScreen" || e.keyCode === 44 || e.code === "PrintScreen" || (e.metaKey && e.shiftKey && (e.key === "s" || e.key === "3" || e.key === "4" || e.key === "5")))) {
+        if (!statusUjianBerlangsung || isTerkunci || isSedangMengumpulkan) return;
+        if (e.key === "PrintScreen" || e.keyCode === 44 || e.code === "PrintScreen" || (e.metaKey && e.shiftKey && (e.key === "s" || e.key === "3" || e.key === "4" || e.key === "5"))) {
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText("Screenshot dilarang.").catch(function() {});
           }
@@ -982,16 +996,20 @@
         }
       });
 
+      function isDalamMasaToleransiSetelahBukaKunci_() {
+        return Date.now() < unlockGraceUntil;
+      }
+
       document.addEventListener("visibilitychange", function() {
-        if (isPreviewMode) return;
-        if (document.hidden && statusUjianBerlangsung && !isTerkunci) {
+        if (isPreviewMode || isDalamMasaToleransiSetelahBukaKunci_()) return;
+        if (document.hidden && statusUjianBerlangsung && !isTerkunci && !isSedangMengumpulkan) {
           eksekusiPelanggaran("Berpindah tab/aplikasi lain!");
         }
       });
 
       document.addEventListener("fullscreenchange", function() {
-        if (isPreviewMode) return;
-        if (!document.fullscreenElement && statusUjianBerlangsung && !isTerkunci) {
+        if (isPreviewMode || isDalamMasaToleransiSetelahBukaKunci_()) return;
+        if (!document.fullscreenElement && statusUjianBerlangsung && !isTerkunci && !isSedangMengumpulkan) {
           eksekusiPelanggaran("Keluar dari Mode Layar Penuh!");
         }
       });
@@ -1021,9 +1039,9 @@
           unsubscribeLockListener();
           unsubscribeLockListener = null;
         }
-        if (unsubscribeLockBackupListener) {
-          unsubscribeLockBackupListener();
-          unsubscribeLockBackupListener = null;
+        if (unsubscribeLockSecondaryListener) {
+          unsubscribeLockSecondaryListener();
+          unsubscribeLockSecondaryListener = null;
         }
       }
 
@@ -1032,6 +1050,7 @@
         hentikanListenerJadwal();
         isTerkunci = false;
         lockTokenId = "";
+        unlockGraceUntil = Date.now() + 2500;
         document.getElementById("modal-lock").classList.add("hidden");
         document.getElementById("input-kode-buka-kunci").value = "";
         document.getElementById("pesan-error-kode-manual").classList.add("hidden");
@@ -1045,7 +1064,7 @@
         document.getElementById("dynamic-watermark").classList.add("hidden");
         document.getElementById("konfirmasi-tes-page").classList.remove("hidden");
 
-        var sisaPeringatan = MAX_PELANGGARAN - jumlahPelanggaran;
+        var sisaPeringatan = Math.max(0, MAX_PELANGGARAN - jumlahPelanggaran);
         if (jumlahPelanggaran >= MAX_PELANGGARAN - 1) {
           document.getElementById("kt-status").innerText = "Melanjutkan Ujian (Peringatan Terakhir - Sisa 1x)";
           document.getElementById("kt-status").className = "text-red-400 font-semibold";
@@ -1058,31 +1077,52 @@
         document.getElementById("kt-sisa").innerText = Math.floor(totalDetikUjian / 60) + " Menit " + (totalDetikUjian % 60) + " Detik";
       }
 
-      function dengarkanBukaKunciRealtime(expectedLockToken, targetServer) {
-        hentikanListenerKunci();
-        if (!dataUserAktif || !dataUserAktif.nisn) return;
-        var docId = getAbsensiDocId(dataUserAktif.nisn);
-        var activeTargetDb = (targetServer === "cadangan" && typeof dbBackup !== "undefined" && dbBackup) ? dbBackup : db;
-        var labelSumber = (targetServer === "cadangan") ? "otomatis dari dashboard cadangan" : "otomatis dari dashboard";
-        var pernahTerbacaTerkunci = false;
+      function tampilkanModalLockTanpaTambahPelanggaran(alasan, serverSumber, tokenKunci) {
+        if (isSedangMengumpulkan) return;
+        isTerkunci = true;
+        var safeJml = Math.max(1, Math.min(jumlahPelanggaran || 1, MAX_PELANGGARAN - 1));
+        jumlahPelanggaran = safeJml;
+        lockTokenId = tokenKunci || ("LOCK_RESUME_" + Date.now());
+        lockTargetServer = serverSumber || "utama";
 
-        unsubscribeLockListener = activeTargetDb.collection("log_absensi").doc(docId).onSnapshot(function(doc) {
-          if (!doc.exists || !isTerkunci) return;
-          if (expectedLockToken && lockTokenId !== expectedLockToken) return;
+        document.getElementById("input-kode-buka-kunci").value = "";
+        document.getElementById("pesan-error-kode-manual").classList.add("hidden");
+        document.getElementById("pesan-lock-info").innerText = "Alasan: " + (alasan || "Status sesi masih TERKUNCI di server.");
+        document.getElementById("status-pelanggaran-teks").innerText =
+          "⚠️ Pelanggaran ke-" + jumlahPelanggaran + " dari " + MAX_PELANGGARAN + ". Angkat tangan & lapor Pengawas.";
+        document.getElementById("modal-lock").classList.remove("hidden");
 
+        dengarkanBukaKunciRealtime(lockTokenId, lockTargetServer, true);
+      }
+
+      function pasangListenerSatuDb_(targetDbInstance, expectedLockToken, sudahTerkunciSebelumnya, labelSumber) {
+        var pernahTerbacaTerkunci = !!sudahTerkunciSebelumnya;
+        return targetDbInstance.collection("log_absensi").doc(getAbsensiDocId(dataUserAktif.nisn)).onSnapshot(function(doc) {
+          if (!doc.exists || !isTerkunci || isSedangMengumpulkan) return;
           var d = doc.data() || {};
-          // Pastikan dokumen benar-benar sudah memasuki status TERKUNCI untuk sesi kunci ini sebelum menerima status AKTIF
           if (d.statusSesi === "TERKUNCI") {
-            if (!expectedLockToken || !d.lockToken || d.lockToken === expectedLockToken) {
+            if (!expectedLockToken || !d.lockToken || d.lockToken === expectedLockToken || sudahTerkunciSebelumnya) {
               pernahTerbacaTerkunci = true;
             }
             return;
           }
-
           if (d.statusSesi === "AKTIF" && pernahTerbacaTerkunci) {
             lanjutkanSetelahBukaKunci(labelSumber);
           }
         }, function() {});
+      }
+
+      function dengarkanBukaKunciRealtime(expectedLockToken, targetServer, sudahTerkunciSebelumnya) {
+        hentikanListenerKunci();
+        if (!dataUserAktif || !dataUserAktif.nisn) return;
+        var primaryDb = (targetServer === "cadangan" && typeof dbBackup !== "undefined" && dbBackup) ? dbBackup : db;
+        var primaryLabel = (targetServer === "cadangan") ? "otomatis dari dashboard cadangan" : "otomatis dari dashboard";
+        unsubscribeLockListener = pasangListenerSatuDb_(primaryDb, expectedLockToken, sudahTerkunciSebelumnya, primaryLabel);
+
+        // Pasang pendengar cadangan yang hanya merespons AKTIF jika kunci memang sudah aktif di sesi ini
+        if (typeof dbBackup !== "undefined" && dbBackup && primaryDb !== dbBackup) {
+          unsubscribeLockSecondaryListener = pasangListenerSatuDb_(dbBackup, expectedLockToken, sudahTerkunciSebelumnya, "otomatis dari dashboard cadangan");
+        }
       }
 
       async function verifikasiKodeManual() {
@@ -1122,7 +1162,8 @@
       }
 
       async function eksekusiPelanggaran(alasan) {
-        if (isPreviewMode || isTerkunci) return;
+        if (isPreviewMode || isTerkunci || isSedangMengumpulkan) return;
+        isTerkunci = true;
         jumlahPelanggaran++;
         saveStateToLocal();
 
@@ -1154,11 +1195,10 @@
           }
 
           alert("❌ BATAS " + MAX_PELANGGARAN + " PELANGGARAN TERCAPAI! Jawaban Anda dikirim paksa secara otomatis.");
-          prosesPengumpulanNilai("Diskualifikasi (5x Pelanggaran)");
+          await prosesPengumpulanNilai("Diskualifikasi (5x Pelanggaran)");
           return;
         }
 
-        isTerkunci = true;
         var currentLockToken = "LOCK_" + Date.now() + "_" + jumlahPelanggaran;
         lockTokenId = currentLockToken;
 
@@ -1169,7 +1209,10 @@
           "⚠️ Pelanggaran ke-" + jumlahPelanggaran + " dari " + MAX_PELANGGARAN + ". Angkat tangan & lapor Pengawas.";
         document.getElementById("modal-lock").classList.remove("hidden");
 
-        var targetTulisLock = "utama";
+        var targetTulisLock = (typeof isUtamaSudahMencapaiBatas45k === "function" && isUtamaSudahMencapaiBatas45k("write") && typeof dbBackup !== "undefined" && dbBackup)
+          ? "cadangan"
+          : "utama";
+
         if (dataUserAktif && dataUserAktif.nisn && typeof db !== "undefined") {
           var absDocId = getAbsensiDocId(dataUserAktif.nisn);
           var resLock = await setDocWithBackup("log_absensi", absDocId, {
@@ -1190,9 +1233,8 @@
         }
 
         lockTargetServer = targetTulisLock;
-        // Pasang listener hanya setelah status TERKUNCI selesai ditulis ke server yang bersangkutan
-        if (isTerkunci && lockTokenId === currentLockToken) {
-          dengarkanBukaKunciRealtime(currentLockToken, targetTulisLock);
+        if (isTerkunci && lockTokenId === currentLockToken && !isSedangMengumpulkan) {
+          dengarkanBukaKunciRealtime(currentLockToken, targetTulisLock, false);
         }
       }
 
@@ -1223,10 +1265,15 @@
           if (docRef.exists && String(docRef.data().noPeserta).trim() === u) {
             found = docRef.data();
           } else {
-            var sumberLogin = [db];
-            if (typeof dbBackup !== "undefined" && dbBackup) sumberLogin.push(dbBackup);
+            var sumberLogin = (typeof isUtamaSudahMencapaiBatas45k === "function" && isUtamaSudahMencapaiBatas45k("read") && typeof dbBackup !== "undefined" && dbBackup)
+              ? [dbBackup, db]
+              : ((typeof dbBackup !== "undefined" && dbBackup) ? [db, dbBackup] : [db]);
+
             for (var s = 0; s < sumberLogin.length && !found; s++) {
               try {
+                if (typeof catatOperasiKuota_ === "function") {
+                  catatOperasiKuota_(sumberLogin[s] === dbBackup ? "cadangan" : "utama", "read", 1);
+                }
                 var snap = await sumberLogin[s].collection("data_siswa").where("noPeserta", "==", u).limit(5).get();
                 snap.forEach(function(d) {
                   if (String(d.data().nisn).trim() === p) found = d.data();
@@ -1361,8 +1408,10 @@
         await pastikanTercatatHadir("submit_token");
 
         try {
-          var snap = await db.collection("master_ujian").where("token", "==", t).get();
+          var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+          var snap = await readCtx.dbInstance.collection("master_ujian").where("token", "==", t).get();
           if (snap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            if (typeof catatOperasiKuota_ === "function") catatOperasiKuota_("cadangan", "read", 1);
             snap = await dbBackup.collection("master_ujian").where("token", "==", t).get();
           }
 
@@ -1469,8 +1518,10 @@
           dataUserAktif.token = paketUjian.token;
           dataUserAktif.sisaDetik = paketUjian.sisaDetik;
 
-          var chunksSnap = await db.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
+          var readCtx = (typeof getActiveReadDb === "function") ? getActiveReadDb(1) : { dbInstance: db };
+          var chunksSnap = await readCtx.dbInstance.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
           if (chunksSnap.empty && typeof dbBackup !== "undefined" && dbBackup) {
+            if (typeof catatOperasiKuota_ === "function") catatOperasiKuota_("cadangan", "read", 1);
             chunksSnap = await dbBackup.collection("bank_soal").doc(paketUjian.formId).collection("chunks").orderBy("chunkIndex").get();
           }
 
@@ -1568,7 +1619,12 @@
         try {
           var doc = await getDocWithBackup("log_absensi", getAbsensiDocId(dataUserAktif.nisn));
           if (doc.exists && doc.data().statusSesi === "TERKUNCI") {
-            eksekusiPelanggaran("Mendeteksi status masih terkunci di server.");
+            var dLock = doc.data() || {};
+            tampilkanModalLockTanpaTambahPelanggaran(
+              dLock.catatan || "Mendeteksi status masih terkunci di server.",
+              "utama",
+              dLock.lockToken || ""
+            );
           }
         } catch (e) {}
       }
@@ -1576,7 +1632,7 @@
       function mulaiTimerUjian() {
         if (intervalTimerUjian) clearInterval(intervalTimerUjian);
         intervalTimerUjian = setInterval(function() {
-          if (!statusUjianBerlangsung) return;
+          if (!statusUjianBerlangsung || isTerkunci || isSedangMengumpulkan) return;
           totalDetikUjian--;
           var jam = Math.floor(totalDetikUjian / 3600), menit = Math.floor((totalDetikUjian % 3600) / 60), detik = totalDetikUjian % 60;
           document.getElementById("timer-ujian").innerText = (jam < 10 ? "0" + jam : jam) + ":" + (menit < 10 ? "0" + menit : menit) + ":" + (detik < 10 ? "0" + detik : detik);
@@ -1692,7 +1748,7 @@
 
             timerSoalInterval = setInterval(function() {
               if (!statusUjianBerlangsung) return;
-              if (isTerkunci) return;
+              if (isTerkunci || isSedangMengumpulkan) return;
               detiktersisa--;
               if (detiktersisa > 0) {
                 if (indeksSoalSekarang === i) {
@@ -1809,6 +1865,8 @@
       async function prosesPengumpulanNilai(ket) {
         if (isPreviewMode || isSedangMengumpulkan) return;
         isSedangMengumpulkan = true;
+        isTerkunci = false;
+        lockTokenId = "";
 
         var btnSelesaiEl = document.getElementById("btn-selesai");
         if (btnSelesaiEl) {
@@ -1877,6 +1935,10 @@
         if (resRekap.ok) {
           tersimpanUtama = true;
           targetFirestore = resRekap.target;
+          // Kirim juga rekap ke Spreadsheet V2 agar data dari server 1 maupun 2 masuk ke Spreadsheet V2
+          if (typeof kirimRekapKeSpreadsheetV2 === "function") {
+            kirimRekapKeSpreadsheetV2(Object.assign({}, payloadRekap, { serverAsal: targetFirestore })).catch(function() {});
+          }
         } else {
           masukAntreanBackup({ id: backupIdRekap, payload: payloadRekap });
           tersimpanCadangan = await kirimKeWebAppBackup(payloadRekap);
@@ -1892,9 +1954,9 @@
         }
 
         var ketSimpan = tersimpanUtama
-          ? ("Jawaban berhasil terekam di server Firebase (" + targetFirestore + ").")
+          ? ("Jawaban berhasil terekam di server Firebase (" + targetFirestore + ") dan diteruskan ke Spreadsheet V2.")
           : (tersimpanCadangan
-            ? "Server/kuota utama sedang bermasalah; data dikirim ke server cadangan dan salinan lokal tetap dijaga. Tunjukkan layar ini ke pengawas sebelum keluar."
+            ? "Server/kuota utama sedang bermasalah; data dikirim ke server cadangan/Spreadsheet V2 dan salinan lokal tetap dijaga. Tunjukkan layar ini ke pengawas sebelum keluar."
             : "Pengiriman ke server/cadangan tertunda. Nilai tetap tersimpan di perangkat ini—klik Kirim Ulang Sekarang atau lapor ke pengawas.");
 
         document.getElementById("dynamic-watermark").classList.add("hidden");
