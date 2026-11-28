@@ -1,10 +1,12 @@
 // =========================================================================
-// KONFIGURASI FIREBASE GANDA - CBT ASAS MAN 1 TABALONG (SERVER UTAMA + CADANGAN)
+// KONFIGURASI FIREBASE GANDA + AMBANG KUOTA 45.000 + REKAP SPREADSHEET V2
 // Utama: cbt-man1-tabalong | Cadangan: cbt-man1-tabalong-2
 // =========================================================================
 
-const CBT_BUILD_VERSION = "sesi2_utama_fb1_2026_11_27_v3";
+const CBT_BUILD_VERSION = "sesi2_v5_resilient_lock_spv2";
 const CBT_VERSION_KEY = "CBT_MAN1_ACTIVE_BUILD";
+const QUOTA_THRESHOLD_DAILY = 45000;
+const URL_SPREADSHEET_V2 = "https://script.google.com/macros/s/AKfycbwgUMjSaWjgK-ItnLeg96mhuEMfCvmKzveI4zejZS7jLhgTbm3uULOy1Nb1F9BFdoz9/exec";
 
 (function autoCleanStaleServerCache() {
   try {
@@ -126,19 +128,144 @@ function parseJadwalDateTime(tanggalStr, jamStr, isEnd) {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
+function getQuotaCounterKey_(serverLabel) {
+  return "CBT_QUOTA_" + getTodayStr() + "_" + sanitizeId(serverLabel || "utama");
+}
+
+function bacaCounterKuota_(serverLabel) {
+  try {
+    const raw = localStorage.getItem(getQuotaCounterKey_(serverLabel));
+    const obj = raw ? JSON.parse(raw) : null;
+    if (!obj) return { reads: 0, writes: 0 };
+    return {
+      reads: Number(obj.reads || 0),
+      writes: Number(obj.writes || 0)
+    };
+  } catch (e) {
+    return { reads: 0, writes: 0 };
+  }
+}
+
+function catatOperasiKuota_(serverLabel, jenis, jumlah) {
+  const delta = Math.max(1, Number(jumlah || 1));
+  const curr = bacaCounterKuota_(serverLabel);
+  if (jenis === "read") curr.reads += delta;
+  if (jenis === "write") curr.writes += delta;
+  try {
+    localStorage.setItem(getQuotaCounterKey_(serverLabel), JSON.stringify(curr));
+  } catch (e) {}
+  return curr;
+}
+
+function tandaiKuotaUtamaPenuh_() {
+  try {
+    localStorage.setItem(
+      getQuotaCounterKey_("utama"),
+      JSON.stringify({ reads: QUOTA_THRESHOLD_DAILY, writes: QUOTA_THRESHOLD_DAILY })
+    );
+  } catch (e) {}
+}
+
+function isQuotaOrLimitError_(err) {
+  const msg = String((err && (err.code || err.message)) || "").toLowerCase();
+  return (
+    msg.includes("resource-exhausted") ||
+    msg.includes("quota") ||
+    msg.includes("limit") ||
+    msg.includes("exceeded")
+  );
+}
+
+function isUtamaSudahMencapaiBatas45k(jenisOperasi) {
+  const c = bacaCounterKuota_("utama");
+  if (jenisOperasi === "read") {
+    return c.reads >= QUOTA_THRESHOLD_DAILY || c.writes >= QUOTA_THRESHOLD_DAILY;
+  }
+  if (jenisOperasi === "write") {
+    return c.writes >= QUOTA_THRESHOLD_DAILY || c.reads >= QUOTA_THRESHOLD_DAILY;
+  }
+  return c.reads >= QUOTA_THRESHOLD_DAILY || c.writes >= QUOTA_THRESHOLD_DAILY;
+}
+
+function getActiveReadDb(opsionalJumlahRead) {
+  catatOperasiKuota_("utama", "read", opsionalJumlahRead || 1);
+  if (isUtamaSudahMencapaiBatas45k("read") && dbBackup) {
+    catatOperasiKuota_("cadangan", "read", opsionalJumlahRead || 1);
+    return { dbInstance: dbBackup, serverName: "cadangan", autoSwitchedByQuota: true };
+  }
+  return { dbInstance: db, serverName: "utama", autoSwitchedByQuota: false };
+}
+
+function getActiveWriteDb(opsionalJumlahWrite) {
+  catatOperasiKuota_("utama", "write", opsionalJumlahWrite || 1);
+  if (isUtamaSudahMencapaiBatas45k("write") && dbBackup) {
+    catatOperasiKuota_("cadangan", "write", opsionalJumlahWrite || 1);
+    return { dbInstance: dbBackup, serverName: "cadangan", autoSwitchedByQuota: true };
+  }
+  return { dbInstance: db, serverName: "utama", autoSwitchedByQuota: false };
+}
+
 /**
- * Menulis dokumen ke Firestore utama (`db`), dan jika gagal (kuota/jaringan),
- * otomatis mencoba menulis ke Firestore cadangan (`dbBackup`).
+ * Mengirim salinan rekap / log dari server Firebase 1 maupun 2 ke Spreadsheet V2.
+ */
+async function kirimRekapKeSpreadsheetV2(payload, endpointOverride) {
+  const targetUrl = endpointOverride || URL_SPREADSHEET_V2;
+  if (!targetUrl || targetUrl.indexOf("https://") !== 0) {
+    return false;
+  }
+  const enrichedPayload = Object.assign({}, payload, {
+    spreadsheetTarget: "v2",
+    dikirimPada: new Date().toISOString()
+  });
+  try {
+    await fetch(targetUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(enrichedPayload)
+    });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * Menulis dokumen:
+ * - Jika kuota utama >= 45.000 atau terdeteksi error limit, otomatis alihkan ke `dbBackup`.
+ * - Jika kuota utama < 45.000, tulis ke `db` utama lalu fallback ke `dbBackup` bila gagal.
  */
 async function setDocWithBackup(koleksi, docId, payload, options) {
-  try {
-    await db.collection(koleksi).doc(docId).set(payload, options || {});
-    return { ok: true, target: "utama" };
-  } catch (errUtama) {
-    if (dbBackup) {
+  const opts = options || {};
+  catatOperasiKuota_("utama", "write", 1);
+
+  if (isUtamaSudahMencapaiBatas45k("write") && dbBackup) {
+    catatOperasiKuota_("cadangan", "write", 1);
+    try {
+      await dbBackup.collection(koleksi).doc(docId).set(payload, opts);
+      return { ok: true, target: "cadangan", autoSwitchedByQuota: true };
+    } catch (errCadanganFirst) {
       try {
-        await dbBackup.collection(koleksi).doc(docId).set(payload, options || {});
-        return { ok: true, target: "cadangan" };
+        await db.collection(koleksi).doc(docId).set(payload, opts);
+        return { ok: true, target: "utama", autoSwitchedByQuota: false };
+      } catch (errUtamaSecond) {
+        return { ok: false, target: "none", error: errCadanganFirst };
+      }
+    }
+  }
+
+  try {
+    await db.collection(koleksi).doc(docId).set(payload, opts);
+    return { ok: true, target: "utama", autoSwitchedByQuota: false };
+  } catch (errUtama) {
+    if (isQuotaOrLimitError_(errUtama)) {
+      tandaiKuotaUtamaPenuh_();
+    }
+    if (dbBackup) {
+      catatOperasiKuota_("cadangan", "write", 1);
+      try {
+        await dbBackup.collection(koleksi).doc(docId).set(payload, opts);
+        return { ok: true, target: "cadangan", autoSwitchedByQuota: isQuotaOrLimitError_(errUtama) };
       } catch (errCadangan) {
         return { ok: false, target: "none", error: errCadangan };
       }
@@ -148,15 +275,30 @@ async function setDocWithBackup(koleksi, docId, payload, options) {
 }
 
 /**
- * Mengambil dokumen dari Firestore utama (`db`), lalu fallback ke `dbBackup` jika tidak ada/error.
+ * Mengambil dokumen:
+ * - Jika kuota utama >= 45.000, prioritaskan baca dari `dbBackup` terlebih dahulu.
  */
 async function getDocWithBackup(koleksi, docId) {
+  if (isUtamaSudahMencapaiBatas45k("read") && dbBackup) {
+    catatOperasiKuota_("cadangan", "read", 1);
+    try {
+      const docCad = await dbBackup.collection(koleksi).doc(docId).get();
+      if (docCad.exists) return docCad;
+    } catch (eCad) {}
+  }
+
+  catatOperasiKuota_("utama", "read", 1);
   try {
     const docUtama = await db.collection(koleksi).doc(docId).get();
     if (docUtama.exists) return docUtama;
-  } catch (e) {}
+  } catch (e) {
+    if (isQuotaOrLimitError_(e)) {
+      tandaiKuotaUtamaPenuh_();
+    }
+  }
 
   if (dbBackup) {
+    catatOperasiKuota_("cadangan", "read", 1);
     try {
       const docCadangan = await dbBackup.collection(koleksi).doc(docId).get();
       if (docCadangan.exists) return docCadangan;
