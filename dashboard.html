@@ -1727,8 +1727,8 @@
         var nisnKey = normNisnStr(item.nisn);
         var namaKey = String(item.nama || "").trim().toLowerCase().replace(/\s+/g, " ");
         var mapelKey = String(item.mapel || "").trim().toLowerCase().replace(/[-–—]/g, " ").replace(/\bkelas\b.*$/i, "").replace(/\s+/g, " ").trim();
-        var idUtama = nisnKey || namaKey;
-        if (!idUtama && !mapelKey) return;
+        var idUtama = nisnKey ? ("NISN:" + nisnKey) : ("NAMA:" + namaKey + "|DOC:" + String(item._docId || ""));
+        if (!nisnKey && !namaKey && !mapelKey) return;
         var k = idUtama + "|" + mapelKey;
         var prev = mapUnik.get(k);
         if (!prev) {
@@ -1780,22 +1780,31 @@
 
         function petakanDokRekap_(doc, asalServer) {
           var d = doc.data() || {};
-          var nk = normNisnStr(d.nisn);
+          var rawNisn = d.nisn || d.NISN || d.nis || d.studentId || d.noPeserta || "";
+          var nk = normNisnStr(rawNisn);
           var refSiswa = nk ? (mapSiswaByNisn[nk] || null) : null;
-          var nilaiFix = (d.nilaiAkhir !== undefined && d.nilaiAkhir !== null && d.nilaiAkhir !== "")
-            ? d.nilaiAkhir
-            : ((d.nilai !== undefined && d.nilai !== null && d.nilai !== "") ? d.nilai : "");
-          var wSort = d.waktuSelesai || d.waktuSort || d.updatedAt || d.tanggal || "";
+          if (!refSiswa && (d.nama || d.namaSiswa)) {
+            var namaCari = String(d.nama || d.namaSiswa).trim().toLowerCase().replace(/\s+/g, " ");
+            refSiswa = (siswaMasterList || []).find(function(s) {
+              return String(s.nama || "").trim().toLowerCase().replace(/\s+/g, " ") === namaCari;
+            }) || null;
+          }
+          var nilaiCandidate = [d.nilaiAkhir, d.nilai, d.skor, d.score, d.totalNilai].find(function(v) {
+            return v !== undefined && v !== null && String(v).trim() !== "";
+          });
+          var nilaiFix = (nilaiCandidate !== undefined) ? nilaiCandidate : "";
+          var wSort = d.waktuSelesai || d.waktuSort || d.waktuView || d.updatedAt || d.tanggal || "";
           return {
+            _docId: doc.id,
             waktu: d.waktuView || d.jamView || d.tanggal || "-",
             waktuSort: String(wSort),
             tanggal: d.tanggal || safeTodayStr(),
-            nisn: d.nisn || (refSiswa ? refSiswa.nisn : ""),
+            nisn: String(rawNisn || (refSiswa ? refSiswa.nisn : "")).trim(),
             noPeserta: d.noPeserta || (refSiswa ? refSiswa.noPeserta : ""),
-            nama: d.nama || d.namaSiswa || (refSiswa ? refSiswa.nama : "-"),
-            kelas: d.kelas || d.kelasSiswa || (refSiswa ? refSiswa.kelas : "-"),
+            nama: String(d.nama || d.namaSiswa || (refSiswa ? refSiswa.nama : "-")).trim(),
+            kelas: String(d.kelas || d.kelasSiswa || (refSiswa ? refSiswa.kelas : "-")).trim(),
             angkatan: d.angkatan || (refSiswa ? ekstrakAngkatanSiswa(refSiswa) : ""),
-            mapel: d.mapel || d.mataPelajaran || "-",
+            mapel: String(d.mapel || d.mataPelajaran || d.namaMapel || "-").trim(),
             nilai: nilaiFix,
             jumlahPelanggaran: d.jumlahPelanggaran || 0,
             status: d.status || (nilaiFix !== "" ? "Selesai" : "-"),
@@ -1988,9 +1997,12 @@
       var qHasil = (qHasilEl ? qHasilEl.value : "").trim().toLowerCase();
       var qHasilNorm = qHasil.replace(/^0+/, "");
 
+      function normFilterStr_(s) {
+        return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+      }
       var filtered = dataHasilUjianGlobal.filter(function(item) {
-        var mk = (fKelas === "Semua") || (item.kelas === fKelas);
-        var mm = (fMapel === "Semua") || (item.mapel === fMapel);
+        var mk = (fKelas === "Semua") || (normFilterStr_(item.kelas) === normFilterStr_(fKelas));
+        var mm = (fMapel === "Semua") || (normFilterStr_(item.mapel) === normFilterStr_(fMapel)) || (normFilterStr_(item.mapel).indexOf(normFilterStr_(fMapel)) !== -1 && normFilterStr_(fMapel).length > 5);
         var ms = true;
         if (fStatus === "Curang") ms = String(item.status || "").toLowerCase().includes("diskualifikasi") || String(item.status || "").toLowerCase().includes("pelanggaran");
         else if (fStatus === "DibawahKKM") ms = parseFloat(item.nilai) < 60;
