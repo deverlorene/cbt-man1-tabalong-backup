@@ -181,7 +181,15 @@
               <div class="bg-red-50 p-4 rounded-lg border border-red-200"><div class="text-red-600 text-xs font-bold uppercase">Belum Hadir</div><div class="text-2xl font-black text-red-700" id="r-belum">0</div></div>
             </div>
 
-            <div class="overflow-x-auto"><table class="w-full text-left text-sm whitespace-nowrap"><thead class="bg-slate-50 text-slate-500 text-xs uppercase font-bold"><tr><th class="px-4 py-3">Nama Siswa</th><th class="px-4 py-3">Kelas / Angk.</th><th class="px-4 py-3">Ruang</th><th class="px-4 py-3 text-center">Status Hadir</th><th class="px-4 py-3">Jam Login</th><th class="px-4 py-3">Status Pengerjaan & Jadwal</th></tr></thead><tbody class="divide-y divide-slate-100 text-slate-700" id="tb-ruang-ujian"><tr><td colspan="6" class="text-center py-4">Memuat data...</td></tr></tbody></table></div>
+            <div id="toolbar-hapus-ruang" class="hidden mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span class="font-bold text-red-700" id="info-terpilih-ruang">0 data dipilih</span>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="bersihkanPilihanRuang()" class="px-3 py-1.5 rounded bg-white border border-slate-300 text-slate-700 font-bold hover:bg-slate-100">Batal Pilih</button>
+                <button type="button" id="btn-hapus-massal-ruang" onclick="hapusDataRuangTerpilih()" class="px-3.5 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white font-bold shadow-sm"><i class="fas fa-trash mr-1"></i> Hapus Data Terpilih</button>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto"><table class="w-full text-left text-sm whitespace-nowrap"><thead class="bg-slate-50 text-slate-500 text-xs uppercase font-bold"><tr><th class="px-3 py-3 text-center w-10"><input type="checkbox" id="chk-semua-ruang" onchange="togglePilihSemuaRuang(this)" title="Pilih semua di halaman ini"></th><th class="px-3 py-3 text-center w-12">No</th><th class="px-4 py-3">Nama Siswa</th><th class="px-4 py-3">Kelas / Angk.</th><th class="px-4 py-3">Ruang</th><th class="px-4 py-3 text-center">Status Hadir</th><th class="px-4 py-3">Jam Login</th><th class="px-4 py-3">Status Pengerjaan & Jadwal</th></tr></thead><tbody class="divide-y divide-slate-100 text-slate-700" id="tb-ruang-ujian"><tr><td colspan="8" class="text-center py-4">Memuat data...</td></tr></tbody></table></div>
 
             <div id="pagination-ruang" class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4 pt-4 border-t border-slate-200 text-xs text-slate-600">
               <span id="info-page-ruang">Halaman 1 dari 1 (0 data)</span>
@@ -1042,12 +1050,35 @@
       return hariNama + ", " + String(dd).padStart(2, "0") + "/" + String(mm + 1).padStart(2, "0") + "/" + yyyy;
     }
 
+    function formatJamAman_(jamVal) {
+      if (!jamVal) return "";
+      if (typeof jamVal === "object" && typeof jamVal.toDate === "function") {
+        var dtTs = jamVal.toDate();
+        return String(dtTs.getHours()).padStart(2, "0") + ":" + String(dtTs.getMinutes()).padStart(2, "0");
+      }
+      var raw = String(jamVal).trim();
+      if (!raw) return "";
+      var matchJam = raw.match(/(\d{1,2}):(\d{2})/);
+      if (matchJam) {
+        var hh = parseInt(matchJam[1], 10);
+        var mm = parseInt(matchJam[2], 10);
+        if (!isNaN(hh) && !isNaN(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+          return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+        }
+      }
+      var dtParsed = new Date(raw);
+      if (!isNaN(dtParsed.getTime())) {
+        return String(dtParsed.getHours()).padStart(2, "0") + ":" + String(dtParsed.getMinutes()).padStart(2, "0");
+      }
+      return "";
+    }
+
     function formatSesiJadwal(j) {
       if (!j) return "";
       var tglStr = String(j.tanggal || "").trim();
       var hariTgl = formatHariTanggalIndo(tglStr);
-      var jm = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamMulai) : String(j.jamMulai || "").trim().substring(0, 5);
-      var js = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamSelesai) : String(j.jamSelesai || "").trim().substring(0, 5);
+      var jm = formatJamAman_(j.jamMulai);
+      var js = formatJamAman_(j.jamSelesai);
       var jamStr = "";
       if (jm && js) jamStr = jm + " - " + js;
       else if (jm) jamStr = "Mulai " + jm;
@@ -1061,19 +1092,13 @@
     function buatKunciSesi(j) {
       if (!j) return "";
       var tgl = String(j.tanggal || "").trim();
-      var jm = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamMulai) : String(j.jamMulai || "").trim().substring(0, 5);
-      var js = (typeof normalizeTimeHHMM === "function") ? normalizeTimeHHMM(j.jamSelesai) : String(j.jamSelesai || "").trim().substring(0, 5);
+      var jm = formatJamAman_(j.jamMulai);
+      var js = formatJamAman_(j.jamSelesai);
       return tgl + "|" + jm + "-" + js;
     }
 
     function normJamHhMm(jStr) {
-      if (typeof normalizeTimeHHMM === "function") return normalizeTimeHHMM(jStr);
-      var raw = String(jStr || "").trim();
-      if (!raw) return "";
-      var parts = raw.split(":");
-      var hh = String(parseInt(parts[0] || "0", 10)).padStart(2, "0");
-      var mm = String(parseInt(parts[1] || "0", 10)).padStart(2, "0");
-      return hh + ":" + mm;
+      return formatJamAman_(jStr);
     }
 
     function evaluasiStatusJadwalAktif(jadwalObj, nowDate) {
@@ -1521,12 +1546,16 @@
       var startIdx = (currentPageRuang - 1) * PAGE_SIZE_TABEL;
       var pageSlice = filtered.slice(startIdx, startIdx + PAGE_SIZE_TABEL);
 
+      var chkSemua = document.getElementById("chk-semua-ruang");
+      if (chkSemua) chkSemua.checked = false;
+
       tb.innerHTML = "";
       if (pageSlice.length === 0) {
-        tb.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Tidak ada data sesuai filter.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-slate-400">Tidak ada data sesuai filter.</td></tr>';
       } else {
         var frag = document.createDocumentFragment();
-        pageSlice.forEach(function(d) {
+        pageSlice.forEach(function(d, idxInPage) {
+          var nomorUrut = startIdx + idxInPage + 1;
           var tr = document.createElement("tr");
           var isHadirItem = d.statusHadir.indexOf("Hadir") === 0;
           var cHadir = d.statusHadir === "Hadir (Susulan)"
@@ -1548,11 +1577,13 @@
             : "";
 
           tr.className = `${rowBg} border-b border-slate-100 transition-colors`;
-          tr.innerHTML = `<td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span>${mapelHtml}</td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${escapeAttr(d.statusHadir)}</span></td><td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block whitespace-normal max-w-[260px]">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td>`;
+          tr.innerHTML = `<td class="px-3 py-3 text-center"><input type="checkbox" class="chk-item-ruang rounded border-slate-300 text-red-600 focus:ring-red-500 cursor-pointer" data-nisn="${escapeAttr(d.nisn)}" data-nama="${escapeAttr(d.nama)}" onchange="perbaruiToolbarHapusRuang()"></td><td class="px-3 py-3 text-center font-mono text-xs font-bold text-slate-500">${nomorUrut}</td><td class="px-4 py-3 font-semibold">${escapeAttr(d.nama)}<br><span class="text-xs text-slate-400 font-normal">${escapeAttr(d.nisn)}</span>${mapelHtml}</td><td class="px-4 py-3">${escapeAttr(d.kelas)}<br><span class="text-xs text-slate-400">Angk: ${escapeAttr(d.angkatan)}</span></td><td class="px-4 py-3 font-bold">${escapeAttr(d.ruang)}</td><td class="px-4 py-3 text-center"><span class="${cHadir} px-2 py-1 rounded text-xs font-bold">${escapeAttr(d.statusHadir)}</span></td><td class="px-4 py-3 font-mono text-xs">${escapeAttr(d.jamLogin)}</td><td class="px-4 py-3 align-middle"><span class="${cKet} block whitespace-normal max-w-[260px]">${escapeAttr(ketTampil)}</span>${aksiUnlock}</td>`;
           frag.appendChild(tr);
         });
         tb.appendChild(frag);
       }
+
+      perbaruiToolbarHapusRuang();
 
       document.getElementById("r-total").innerText = tPeserta;
       document.getElementById("r-hadir").innerText = tHadir;
@@ -1564,10 +1595,86 @@
       if (infoPageRuang) {
         var shownStart = filtered.length === 0 ? 0 : (startIdx + 1);
         var shownEnd = Math.min(filtered.length, startIdx + pageSlice.length);
-        infoPageRuang.innerText = `Halaman ${currentPageRuang} dari ${totalPages} • Menampilkan ${shownStart}-${shownEnd} dari ${filtered.length} siswa (50/hal)`;
+        infoPageRuang.innerText = `Halaman ${currentPageRuang} dari ${totalPages} • Menampilkan ${pageSlice.length} data di halaman ini (${shownStart}-${shownEnd} dari ${filtered.length} total siswa)`;
       }
       if (btnPrevRuang) btnPrevRuang.disabled = (currentPageRuang <= 1);
       if (btnNextRuang) btnNextRuang.disabled = (currentPageRuang >= totalPages);
+    }
+
+    function togglePilihSemuaRuang(masterChk) {
+      var checked = !!(masterChk && masterChk.checked);
+      var boxes = document.querySelectorAll(".chk-item-ruang");
+      boxes.forEach(function(b) { b.checked = checked; });
+      perbaruiToolbarHapusRuang();
+    }
+
+    function bersihkanPilihanRuang() {
+      var chkSemua = document.getElementById("chk-semua-ruang");
+      if (chkSemua) chkSemua.checked = false;
+      document.querySelectorAll(".chk-item-ruang").forEach(function(b) { b.checked = false; });
+      perbaruiToolbarHapusRuang();
+    }
+
+    function perbaruiToolbarHapusRuang() {
+      var checkedBoxes = Array.from(document.querySelectorAll(".chk-item-ruang:checked"));
+      var bar = document.getElementById("toolbar-hapus-ruang");
+      var info = document.getElementById("info-terpilih-ruang");
+      if (!bar) return;
+      if (checkedBoxes.length > 0) {
+        bar.classList.remove("hidden");
+        if (info) info.innerText = checkedBoxes.length + " data siswa dipilih";
+      } else {
+        bar.classList.add("hidden");
+      }
+    }
+
+    async function hapusDataRuangTerpilih() {
+      var checkedBoxes = Array.from(document.querySelectorAll(".chk-item-ruang:checked"));
+      if (checkedBoxes.length === 0) return;
+
+      var nisnList = checkedBoxes.map(function(b) { return String(b.getAttribute("data-nisn") || "").trim(); }).filter(Boolean);
+      if (nisnList.length === 0) return;
+
+      if (!confirm("Hapus " + nisnList.length + " data siswa terpilih dari log absensi & rekap harian?")) {
+        return;
+      }
+
+      var btn = document.getElementById("btn-hapus-massal-ruang");
+      var orig = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Menghapus...';
+      }
+
+      try {
+        var today = safeTodayStr();
+        var writeCtx = (typeof getActiveWriteDb === "function") ? getActiveWriteDb(1) : { dbInstance: db };
+        var activeWrite = writeCtx.dbInstance;
+
+        for (var i = 0; i < nisnList.length; i++) {
+          var n = nisnList[i];
+          var absDocId = today + "_" + safeSanitizeId(n);
+          try { await activeWrite.collection("log_absensi").doc(absDocId).delete(); } catch (e1) {}
+          if (typeof dbBackup !== "undefined" && dbBackup) {
+            try { await dbBackup.collection("log_absensi").doc(absDocId).delete(); } catch (e2) {}
+          }
+        }
+
+        dataRuangGlobal = dataRuangGlobal.filter(function(item) {
+          return nisnList.indexOf(String(item.nisn || "").trim()) === -1;
+        });
+
+        await catatAktivitasAdmin("Menghapus massal " + nisnList.length + " data monitoring ruang siswa");
+        renderTabelRuangAdmin();
+        alert("Berhasil menghapus " + nisnList.length + " data terpilih.");
+      } catch (err) {
+        alert("Gagal menghapus data terpilih: " + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = orig;
+        }
+      }
     }
 
     async function bukaKunci(nisn, btnElement) {
