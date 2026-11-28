@@ -732,7 +732,12 @@
         clearMasterCache();
         memCache.hasil = null;
         memCache.logAktivitas = null;
+        dataHasilUjianGlobal = [];
         dataRuangGlobal = [];
+        var pageRuangEl = document.getElementById("page-ruang-ujian");
+        if (pageRuangEl && !pageRuangEl.classList.contains("hidden")) {
+          await muatDataRuangUjian(true);
+        }
         await catatAktivitasAdmin("Menyinkronkan & menggabungkan " + total + " dokumen dari server cadangan ke server utama");
         alert("Sinkronisasi selesai! Sebanyak " + total + " dokumen berhasil digabungkan ke server utama.");
         if (currentUser && currentUser.role === "admin") {
@@ -1247,57 +1252,6 @@
           absenQuery = absenQuery.where("ruang", "==", ruangTarget);
         }
 
-        var listRekapAll = [];
-        if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
-          listRekapAll = dataHasilUjianGlobal;
-        } else {
-          var promisesRekapRuang = [activeDb.collection("rekap_nilai").where("tanggal", "==", tglQuery).get()];
-          if (mapelSesiList.length > 0 && mapelSesiList.length <= 10) {
-            promisesRekapRuang.push(activeDb.collection("rekap_nilai").where("mapel", "in", mapelSesiList).get());
-          }
-          var snapsRuang = await Promise.all(promisesRekapRuang);
-          var seenDocIds = {};
-          snapsRuang.forEach(function(sn) {
-            sn.forEach(function(doc) {
-              if (seenDocIds[doc.id]) return;
-              seenDocIds[doc.id] = true;
-              var d = doc.data();
-              listRekapAll.push({
-                waktu: d.waktuView || d.tanggal || "-",
-                waktuSort: d.waktuSelesai || d.tanggal || "",
-                jamView: d.jamView || "-",
-                tanggal: d.tanggal || "",
-                nisn: d.nisn,
-                nama: d.nama,
-                kelas: d.kelas,
-                mapel: d.mapel,
-                nilai: d.nilaiAkhir,
-                status: d.status || "Selesai"
-              });
-            });
-          });
-        }
-
-        var absenSnap = await absenQuery.get();
-
-        var mapHadir = {};
-        absenSnap.forEach(function(doc) {
-          var d = doc.data();
-          var mLog = String(d.mapel || "").trim();
-          var jLogKey = mLog && mapJadwalByMapel[mLog] ? buatKunciSesi(mapJadwalByMapel[mLog]) : "";
-          if (sesiTarget && sesiTarget !== "Semua" && jLogKey && jLogKey !== sesiTarget) {
-            return;
-          }
-          var nKey = normNisnStr(d.nisn);
-          mapHadir[nKey] = {
-            jam: d.jamLogin || "-",
-            tanggal: d.tanggal || tglQuery,
-            statusSesi: d.statusSesi || "AKTIF",
-            catatan: d.catatan || "-",
-            mapel: mLog || "-"
-          };
-        });
-
         function normalisasiNamaMapel_(str) {
           return String(str || "")
             .toLowerCase()
@@ -1308,6 +1262,72 @@
             .trim();
         }
 
+        var listRekapAll = [];
+        var seenRekapKey = {};
+        function tambahRekapItem_(d) {
+          if (!d) return;
+          var k = normNisnStr(d.nisn) + "|" + normalisasiNamaMapel_(d.mapel) + "|" + String(d.waktuSort || d.waktuSelesai || d.tanggal || d.waktu || "");
+          if (seenRekapKey[k]) return;
+          seenRekapKey[k] = true;
+          listRekapAll.push({
+            waktu: d.waktuView || d.waktu || d.tanggal || "-",
+            waktuSort: d.waktuSort || d.waktuSelesai || d.tanggal || "",
+            jamView: d.jamView || "-",
+            tanggal: d.tanggal || "",
+            nisn: d.nisn,
+            nama: d.nama,
+            kelas: d.kelas,
+            mapel: d.mapel,
+            nilai: (d.nilai !== undefined && d.nilai !== null && d.nilai !== "") ? d.nilai : d.nilaiAkhir,
+            status: d.status || "Selesai"
+          });
+        }
+
+        if (Array.isArray(dataHasilUjianGlobal) && dataHasilUjianGlobal.length > 0) {
+          dataHasilUjianGlobal.forEach(tambahRekapItem_);
+        }
+
+        var promisesRekapRuang = [activeDb.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(600).get()];
+        if (typeof dbBackup !== "undefined" && dbBackup) {
+          promisesRekapRuang.push(dbBackup.collection("rekap_nilai").orderBy("waktuSelesai", "desc").limit(300).get());
+        }
+        var snapsRuang = await Promise.all(promisesRekapRuang);
+        snapsRuang.forEach(function(sn) {
+          sn.forEach(function(doc) {
+            tambahRekapItem_(doc.data());
+          });
+        });
+        dataHasilUjianGlobal = listRekapAll;
+
+        var absenQueries = [absenQuery];
+        if (typeof dbBackup !== "undefined" && dbBackup) {
+          var qBak = dbBackup.collection("log_absensi").where("tanggal", "==", tglQuery);
+          if (isPengawas) qBak = qBak.where("ruang", "==", currentUser.ruang);
+          else if (ruangTarget && ruangTarget !== "Semua") qBak = qBak.where("ruang", "==", ruangTarget);
+          absenQueries.push(qBak);
+        }
+        var absenSnaps = await Promise.all(absenQueries.map(function(q) { return q.get(); }));
+
+        var mapHadir = {};
+        absenSnaps.forEach(function(absenSnap) {
+          absenSnap.forEach(function(doc) {
+            var d = doc.data();
+            var nKey = normNisnStr(d.nisn);
+            if (!nKey) return;
+            var mLog = String(d.mapel || "").trim();
+            var prevH = mapHadir[nKey];
+            if (!prevH || (d.statusSesi === "TERKUNCI" && prevH.statusSesi !== "TERKUNCI")) {
+              mapHadir[nKey] = {
+                jam: d.jamLogin || "-",
+                tanggal: d.tanggal || tglQuery,
+                statusSesi: d.statusSesi || "AKTIF",
+                catatan: d.catatan || "-",
+                mapel: mLog || "-"
+              };
+            }
+          });
+        });
+
         var mapelSesiNormList = mapelSesiList.map(normalisasiNamaMapel_).filter(Boolean);
 
         var mapSelesai = {};
@@ -1317,10 +1337,12 @@
           var jRekapKey = mRekap && mapJadwalByMapel[mRekap] ? buatKunciSesi(mapJadwalByMapel[mRekap]) : "";
           var tglSubmit = String(d.tanggal || "").trim();
 
+          var cocokSesi = true;
           if (sesiTarget && sesiTarget !== "Semua") {
             var cocokMapel = (mapelSesiList.indexOf(mRekap) !== -1) || (mRekapNorm && mapelSesiNormList.indexOf(mRekapNorm) !== -1);
             var cocokKey = (jRekapKey && jRekapKey === sesiTarget);
-            if (!cocokMapel && !cocokKey) return;
+            var cocokTanggal = (tglSubmit && tglSubmit === tglQuery);
+            cocokSesi = cocokMapel || cocokKey || cocokTanggal;
           }
 
           var nKey = normNisnStr(d.nisn);
@@ -1335,7 +1357,8 @@
           var stLower = String(d.status || "").toLowerCase();
           var isDocFinal = hasSkor || stLower.indexOf("selesai") !== -1 || stLower.indexOf("diskualifikasi") !== -1 || stLower.indexOf("habis") !== -1;
           var prev = mapSelesai[nKey];
-          if (!prev || isDocFinal || Number(nilaiVal || 0) >= Number(prev.nilai || 0)) {
+          var keepItem = !prev || (cocokSesi && !prev.cocokSesi) || (isDocFinal && !prev.isFinal) || (Number(nilaiVal || 0) > Number(prev.nilai || 0));
+          if (keepItem) {
             mapSelesai[nKey] = {
               status: d.status || (hasSkor ? "Selesai (Skor: " + nilaiVal + ")" : "Selesai"),
               jamView: d.jamView || "-",
@@ -1345,7 +1368,8 @@
               hasSkor: hasSkor,
               mapel: mRekap || "-",
               isSusulan: isSusulanLuarJadwal,
-              isFinal: isDocFinal
+              isFinal: isDocFinal,
+              cocokSesi: cocokSesi
             };
           }
         });
@@ -1368,15 +1392,7 @@
           var h = mapHadir[nisnNorm] || null;
           var u = mapSelesai[nisnNorm] || null;
 
-          var uCocokSesi = false;
-          if (u && (u.isFinal || u.hasSkor)) {
-            if (!sesiTarget || sesiTarget === "Semua" || mapelSesiList.length === 0) {
-              uCocokSesi = true;
-            } else {
-              var uMapelNorm = normalisasiNamaMapel_(u.mapel);
-              uCocokSesi = (mapelSesiList.indexOf(u.mapel) !== -1) || (uMapelNorm && mapelSesiNormList.indexOf(uMapelNorm) !== -1);
-            }
-          }
+          var uCocokSesi = !!(u && (u.isFinal || u.hasSkor));
           var sudahHadir = !!(h || uCocokSesi);
           var uAktif = uCocokSesi ? u : null;
 
